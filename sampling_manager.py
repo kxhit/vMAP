@@ -5,6 +5,7 @@ from time import perf_counter_ns
 # from scalene import scalene_profiler
 # import scalene
 from tqdm import tqdm
+import trainer
 
 class performance_measure:
 
@@ -158,6 +159,9 @@ class sceneObject:
         # Initialize first frame's world2cam transform
         self.t_wc_batch[0] = t_wc
 
+        # network map
+        self.trainer = trainer.Trainer()
+
     def append_keyframe(self, rgb:torch.tensor, depth:torch.tensor, mask:torch.tensor, bbox_2d:torch.tensor, t_wc:torch.tensor, is_kf:bool):
         # todo if kf: append, else: replace
         assert rgb.shape[:2] == depth.shape
@@ -167,7 +171,7 @@ class sceneObject:
 
         temp_rgbs = torch.empty_like(self.rgbs_batch[0])
         temp_rgbs[..., self.rgb_idx] = rgb
-        temp_rgbs[..., self.obj] = mask
+        temp_rgbs[..., self.state_idx] = mask[..., None]
 
         if not is_kf:   # not kf, replace
             self.rgbs_batch[-1, ...] = temp_rgbs[None, ...]
@@ -273,7 +277,7 @@ class sceneObject:
                 n_bins_cam2surface, valid_depth_count)
 
             # sampling around depth for this object
-            obj_mask = (sampled_rgbs[..., -1] == self.this_obj).view(-1) & valid_depth_mask
+            obj_mask = (sampled_rgbs[..., -1] == self.this_obj).view(-1) & valid_depth_mask # todo obj_mask
             assert sampled_z.shape[0] == obj_mask.shape[0]
             obj_count = obj_mask.count_nonzero()
 
@@ -311,8 +315,10 @@ class sceneObject:
                                    -1)  # view as (n_rays, n_samples, 10)
         input_pcs = origins[..., None, None, :] + (dirs_w[:, :, None, :] *
                                                    sampled_z[..., None])
-
-        return sampled_rgbs, sampled_depth, valid_depth_mask, obj_mask, input_pcs, sampled_z
+        # todo obj_center
+        obj_labels = (sampled_rgbs[..., -1] == self.this_obj).view(-1)
+        # todo standard output tensor shape!
+        return sampled_rgbs[..., :3], sampled_depth, valid_depth_mask, obj_labels, input_pcs, sampled_z
 
 
 class cameraInfo:
