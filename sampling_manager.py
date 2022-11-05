@@ -28,7 +28,7 @@ def origin_dirs_W(T_WC, dirs_C):
     assert T_WC.shape[1:] == (4, 4)
     assert dirs_C.shape[2] == 3
 
-    dirs_W = torch.matmul(T_WC[:, None, :3, :3], dirs_C[..., None]).squeeze()
+    dirs_W = (T_WC[:, None, :3, :3] @ dirs_C[..., None]).squeeze()
 
     origins = T_WC[:, :3, -1]
 
@@ -116,9 +116,10 @@ class sceneObject:
         self.max_bound = 10.0
 
         self.n_keyframes = 1  # Number of keyframes
+        self.keyframe_buffer_size = 20
 
         self.bbox = torch.empty(  # obj bounding bounding box in the frame
-            1,
+            self.keyframe_buffer_size,
             4,
             device=self.device)  # [u low, u high, v low, v high]
         self.bbox[0] = bbox_2d
@@ -126,7 +127,7 @@ class sceneObject:
         # RGB + pixel state batch
         self.rgb_idx = slice(0, 3)
         self.state_idx = slice(3, 4)
-        self.rgbs_batch = torch.empty(1,
+        self.rgbs_batch = torch.empty(self.keyframe_buffer_size,
                                       self.frames_width,
                                       self.frames_height,
                                       4,
@@ -142,7 +143,7 @@ class sceneObject:
         self.rgbs_batch[0, :, :, self.rgb_idx] = rgb
         self.rgbs_batch[0, :, :, self.state_idx] = mask[..., None]
 
-        self.depth_batch = torch.empty(1,
+        self.depth_batch = torch.empty(self.keyframe_buffer_size,
                                        self.frames_width,
                                        self.frames_height,
                                        dtype=torch.float32,
@@ -152,7 +153,7 @@ class sceneObject:
         self.depth_batch[0] = depth
 
         self.t_wc_batch = torch.empty(
-            1, 4, 4,
+            self.keyframe_buffer_size, 4, 4,
             dtype=torch.float32,
             device=self.device)  # world to camera transform
 
@@ -162,36 +163,36 @@ class sceneObject:
         # network map
         self.trainer = trainer.Trainer()
 
+    # @profile
     def append_keyframe(self, rgb:torch.tensor, depth:torch.tensor, mask:torch.tensor, bbox_2d:torch.tensor, t_wc:torch.tensor, is_kf:bool):
         # todo if kf: append, else: replace
         assert rgb.shape[:2] == depth.shape
         assert rgb.shape[:2] == mask.shape
         assert bbox_2d.shape == (4,)
         assert t_wc.shape == (4, 4,)
-
-        temp_rgbs = torch.empty_like(self.rgbs_batch[0])
-        temp_rgbs[..., self.rgb_idx] = rgb
-        temp_rgbs[..., self.state_idx] = mask[..., None]
+        assert self.n_keyframes < self.keyframe_buffer_size - 1
+        assert rgb.dtype == torch.uint8
+        assert mask.dtype == torch.uint8
+        assert depth.dtype == torch.float32
 
         if not is_kf:   # not kf, replace
-            self.rgbs_batch[-1, ...] = temp_rgbs[None, ...]
-
-            self.depth_batch[-1, ...] = depth[None, ...]
-
-            self.t_wc_batch[-1, ...] = t_wc[None, ...]
-
-            self.bbox[-1, ...] = bbox_2d[None, ...]
+            self.rgbs_batch[self.n_keyframes-1, :, :, self.rgb_idx] = rgb
+            self.rgbs_batch[self.n_keyframes-1, :, :, self.state_idx] = mask[..., None]
+            self.depth_batch[self.n_keyframes-1, ...] = depth
+            self.t_wc_batch[self.n_keyframes-1, ...] = t_wc
+            self.bbox[self.n_keyframes-1, ...] = bbox_2d
 
         else:   # is kf, add new kf
-            self.rgbs_batch = torch.cat((self.rgbs_batch, temp_rgbs[None, ...]), 0)
-
-            self.depth_batch = torch.cat((self.depth_batch, depth[None, ...]), 0)
-
-            self.t_wc_batch = torch.cat((self.t_wc_batch, t_wc[None, ...]), 0)
-
-            self.bbox = torch.cat((self.bbox, bbox_2d[None, ...]), 0)
+            self.rgbs_batch[self.n_keyframes, :, :, self.rgb_idx] = rgb
+            self.rgbs_batch[self.n_keyframes, :, :, self.state_idx] = mask[..., None]
+            self.depth_batch[self.n_keyframes, ...] = depth
+            self.t_wc_batch[self.n_keyframes, ...] = t_wc
+            self.bbox[self.n_keyframes, ...] = bbox_2d
 
             self.n_keyframes +=1
+
+        if self.n_keyframes == self.keyframe_buffer_size - 1:
+            self.n_keyframes -= 1
 
     def get_training_samples(self, n_frames, n_samples, cached_rays_dir):
         # Sample pixels
@@ -261,6 +262,7 @@ class sceneObject:
         # sampling for points with invalid depth
         invalid_depth_count = invalid_depth_mask.count_nonzero()
         if invalid_depth_count:
+            print("invalid_depth_count ", invalid_depth_count)
             sampled_z[invalid_depth_mask, :] = stratified_bins(
                 self.min_bound, self.max_bound,
                 n_bins_cam2surface + n_bins, invalid_depth_count)

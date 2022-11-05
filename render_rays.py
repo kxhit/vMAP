@@ -252,8 +252,9 @@ def reduce_batch_loss(loss_mat, var=None, avg=True, mask=None, loss_type="L1"):
             loss = (torch.sum(loss_weighted, dim=-1)/(torch.sum(mask, dim=-1)+1e-10))
             # loss = torch.masked_select(loss_weighted, mask).mean(dim=-1)
             # print("loss ", loss)
-            if (loss > 100000).any():
-                exit(-1)
+            # if (loss > 100000).any():
+            #     print("loss explode")
+            #     exit(-1)
             # loss = loss.sum()
         else:
             loss = torch.mean(loss_weighted, dim=-1).sum()

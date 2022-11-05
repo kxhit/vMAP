@@ -7,20 +7,26 @@ import loss
 from sampling_manager import *
 import utils
 import open3d
+import dataset
+from torch.utils.data import DataLoader
+from torchvision import transforms
+import image_transforms
 
 # todo verify on replica
 if __name__ == "__main__":
     ###################################
-    # init
+    # init todo arg parser class
     # hyper param for trainer
     training_device = "cuda:0"
     data_device = "cpu"
+    # data_device ="cuda:0"
     # vis_device = "cuda:1"
-    win_size = 5
+    imap_mode = False
+    win_size = 5 * 20
     n_samples_per_frame = 120 // 5
-    min_depth = 0
+    min_depth = 0.
     max_depth = 10.
-    depth_scale = 1000.
+    depth_scale = 1/1000.
 
     # param for dataset
     bbox_scale = 0.2
@@ -61,60 +67,40 @@ if __name__ == "__main__":
     pose_file = os.path.join(root_dir, "traj_w_c.txt")
     pose_all = np.loadtxt(pose_file, delimiter=" ").reshape([-1, 4, 4]).astype(np.float32)
     dataset_len = pose_all.shape[0]
+
+    # load dataset
+    rgb_transform = transforms.Compose(
+        [image_transforms.BGRtoRGB()])
+    depth_transform = transforms.Compose(
+        [image_transforms.DepthScale(depth_scale),
+         image_transforms.DepthFilter(max_depth)])
+    scene_dataset = dataset.Replica(root_dir, pose_file, rgb_transform, depth_transform, imap_mode=imap_mode)
+    # single worker loader
+    dataloader = DataLoader(scene_dataset, batch_size=None, shuffle=False, sampler=None,
+                                 batch_sampler=None, num_workers=0)
+    # # multi worker loader
+    # dataloader = DataLoader(scene_dataset, batch_size=1, shuffle=False, sampler=None,
+    #                          batch_sampler=None, num_workers=4, collate_fn=None,  # todo
+    #                          pin_memory=True, drop_last=False, timeout=0,
+    #                          worker_init_fn=None, generator=None, prefetch_factor=2,
+    #                          persistent_workers=True)
+    dataloader_iterator = iter(dataloader)
+
     for idx in tqdm(range(dataset_len)):
-        ### wrap into dataset get_item ###
-        # idx = 0
-        rgb_file = os.path.join(root_dir, "rgb", "rgb_" + str(idx) + ".png")
-        depth_file = os.path.join(root_dir, "depth", "depth_" + str(idx) + ".png")
-        inst_file = os.path.join(root_dir, "semantic_instance", "semantic_instance_" + str(idx) + ".png")
+        # get data from dataloader
+        sample = next(dataloader_iterator)
+        print(sample["depth"].shape)
+        rgb = sample["image"]#.permute(1,0,2)
+        depth = sample["depth"]#.permute(1,0)
+        twc = sample["T"]
+        inst = sample["obj"]#.permute(1,0)
+        bbox_dict = sample["bbox_dict"]
 
-        depth_np = (cv2.imread(depth_file, -1)/depth_scale).astype(np.float32)
-        rgb_np = cv2.imread(rgb_file).astype(np.uint8)
-        inst_np = cv2.imread(inst_file, cv2.IMREAD_UNCHANGED).astype(np.int32)   # uint16 -> int32
-        twc_np = pose_all[idx]
-
-        inst_ids = np.unique(inst_np)
-
-        rgb = torch.from_numpy(rgb_np).to(data_device).permute(1,0,2) # H,W,C -> W,H,C, # todo RGB or BGR?
-        inst = torch.from_numpy(inst_np).to(data_device).permute(1,0)
-        depth = torch.from_numpy(depth_np).to(data_device).permute(1,0)
-        twc = torch.from_numpy(twc_np).to(data_device)
-
-        batch_masks = []
-        inst_list = []
-        for inst_id in inst_ids:
-            inst_mask = inst_id == inst
-            batch_masks.append(inst_mask)
-            inst_list.append(inst_id)
-
-        batch_masks = torch.from_numpy(np.stack(batch_masks))
-        cmins, cmaxs, rmins, rmaxs = utils.get_bbox2d_batch(batch_masks)
-        obj = np.zeros(inst.shape)
-        bbox_dict = {}
-        # filter out small obj
-        for i in range(batch_masks.shape[0]):
-            w = rmaxs[i] - rmins[i]
-            h = cmaxs[i] - cmins[i]
-            if w <= 10 or h <= 10:  # too small, set to bg   todo
-                obj[batch_masks[i]] = 0
-                continue
-            bbox_enlarged = utils.enlarge_bbox([rmins[i], cmins[i], rmaxs[i], cmaxs[i]], scale=bbox_scale, w=obj.shape[1],
-                                         h=obj.shape[0])
-            inst_id = inst_list[i]
-            obj[batch_masks[i]] = inst_id
-            # bbox_dict.update({inst_id: torch.from_numpy(np.array(bbox_enlarged).reshape(-1))})  # batch format
-            bbox_dict.update({inst_id: torch.from_numpy(np.array([bbox_enlarged[1], bbox_enlarged[3], bbox_enlarged[0], bbox_enlarged[2]]))})  # batch format
-
-        # for bg
-        # bbox_dict.update(
-        #     {0: torch.from_numpy(np.array([int(0), int(0), int(obj.shape[1]), int(obj.shape[0])]).reshape(-1))})
-        bbox_dict.update({0: torch.from_numpy(np.array([int(0), int(obj.shape[0]), 0, int(obj.shape[1])]))})  # batch format
-
-        ### wrap into dataset get_item ###
-        obj_ids = np.unique(obj)
-        with performance_measure(f"Appending data {len(obj_dict.keys())} objects,"):
+        obj_ids = torch.unique(inst)
+        with performance_measure(f"Appending data {len(obj_ids)} objects,"):
             # append new frame info to objs in current view
             for obj_id in obj_ids:
+                obj_id = int(obj_id)
                 obj_mask = obj_id == inst
                 # todo filter out obj_id where mask is too small, move into dataset
                 # convert inst mask to state
@@ -125,7 +111,8 @@ if __name__ == "__main__":
                 if obj_id in obj_dict.keys():
                     scene_obj = obj_dict[obj_id]
                     is_kf = True    # todo change condition according to kf_every
-                    scene_obj.append_keyframe(rgb, depth, state, bbox, twc, is_kf=is_kf)
+                    with performance_measure(f"single append"):
+                        scene_obj.append_keyframe(rgb, depth, state, bbox, twc, is_kf=is_kf)
                 else: # init scene_obj
                     scene_obj = sceneObject(data_device, rgb, depth, state, bbox, twc)
                     obj_dict.update({obj_id: scene_obj})
@@ -144,9 +131,10 @@ if __name__ == "__main__":
         batch_input_pcs = []
         batch_sampled_z = []
 
-        with performance_measure(f"Looping over {len(obj_dict.keys())} objects,"):
+        with performance_measure(f"Samling over {len(obj_dict.keys())} objects,"):
             for obj_id in obj_dict.keys():
-                print("obj_id ", obj_id)
+                # print("obj_id ", obj_id)
+                # with performance_measure(f"Sampling single objects,"):
                 gt_rgb, gt_depth, valid_depth_mask, obj_mask, input_pcs, sampled_z\
                     = obj_dict[obj_id].get_training_samples(win_size, n_samples_per_frame, cam_info.rays_dir_cache)
                 # merge first two dims, win_size*num_per_frame
@@ -157,29 +145,38 @@ if __name__ == "__main__":
                 batch_input_pcs.append(input_pcs.reshape([input_pcs.shape[0]*input_pcs.shape[1], input_pcs.shape[2], input_pcs.shape[3]]))
                 batch_sampled_z.append(sampled_z.reshape([sampled_z.shape[0]*sampled_z.shape[1], sampled_z.shape[2]]))
 
-                print("input pcs ", input_pcs.shape)
-                print("gt depth ", gt_depth.shape)
+                # print("input pcs ", input_pcs.shape)
+                # print("gt depth ", gt_depth.shape)
+                # input pcs torch.Size([100, 24, 11, 3])
+                # gt depth torch.Size([100, 24])
 
-                # # vis3d   # todo the sampled pcs distribution seems weired between cam2surface
-                # # sampled pcs
-                # pc = open3d.geometry.PointCloud()
-                # pc.points = open3d.utility.Vector3dVector(input_pcs.cpu().numpy().reshape(-1,3))
-                # open3d.visualization.draw_geometries([pc])
-                # rgbd = open3d.geometry.RGBDImage.create_from_color_and_depth(
-                #     open3d.geometry.Image(rgb_np),
-                #     open3d.geometry.Image(depth_np),
-                #     depth_trunc=max_depth,
-                #     depth_scale=1,
-                #     convert_rgb_to_intensity=False,
-                # )
-                # T_CW = np.linalg.inv(twc_np)
-                # # input image pc
-                # input_pc = open3d.geometry.PointCloud.create_from_rgbd_image(
-                #     image=rgbd,
-                #     intrinsic=intrinsic_open3d,
-                #     extrinsic=T_CW)
-                # open3d.visualization.draw_geometries([pc, input_pc])
-                #
+                # vis3d   # todo the sampled pcs distribution seems weired between cam2surface
+                # sampled pcs
+                pc = open3d.geometry.PointCloud()
+                pc.points = open3d.utility.Vector3dVector(input_pcs.cpu().numpy().reshape(-1,3))
+                open3d.visualization.draw_geometries([pc])
+                rgb_np = rgb.cpu().numpy().astype(np.uint8).transpose(1,0,2)
+                # print("rgb ", rgb_np.shape)
+                # print(rgb_np)
+                # cv2.imshow("rgb", rgb_np)
+                # cv2.waitKey(1)
+                depth_np = depth.cpu().numpy().astype(np.float32).transpose(1,0)
+                twc_np = twc.cpu().numpy()
+                rgbd = open3d.geometry.RGBDImage.create_from_color_and_depth(
+                    open3d.geometry.Image(rgb_np),
+                    open3d.geometry.Image(depth_np),
+                    depth_trunc=max_depth,
+                    depth_scale=1,
+                    convert_rgb_to_intensity=False,
+                )
+                T_CW = np.linalg.inv(twc_np)
+                # input image pc
+                input_pc = open3d.geometry.PointCloud.create_from_rgbd_image(
+                    image=rgbd,
+                    intrinsic=intrinsic_open3d,
+                    extrinsic=T_CW)
+                open3d.visualization.draw_geometries([pc, input_pc])
+
 
         ####################################################
         # training
@@ -228,6 +225,8 @@ if __name__ == "__main__":
                                  batch_gt_depth, batch_gt_rgb,
                                  batch_depth_mask, batch_obj_mask,
                                  batch_sampled_z)
+            print("loss ", batch_loss)
+
             batch_loss.backward()
             optimiser.step()
             optimiser.zero_grad(set_to_none=True)

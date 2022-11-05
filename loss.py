@@ -7,6 +7,10 @@ mse_loss = torch.nn.MSELoss(reduction="none")
 def step_batch_loss(alpha, color, gt_depth, gt_color, sem_labels, mask_depth, z_vals,
                     color_scaling=5.0, opacity_scaling=10.0):
     mask_obj = sem_labels == 1
+    print("mask_depth ", mask_depth.shape)
+    print("mask_obj ", mask_obj.shape)
+    print("z_vals ", z_vals.shape)
+
     # invalid_obj_mask = sem == -1    # no decided obj mask todo should we supervise mask=-1 col loss?
     # sem_scaling = 8.0
     # color_scaling = self.color_scaling #5.0
@@ -17,13 +21,16 @@ def step_batch_loss(alpha, color, gt_depth, gt_color, sem_labels, mask_depth, z_
     occupancy = render_rays.occupancy_activation(alpha)
     termination = render_rays.occupancy_to_termination(occupancy, is_batch=True)  # shape [num_batch, num_ray, points_per_ray]
     print("termination ", termination.shape)
-    print("z_vals ", z_vals.shape)
+    # print("z_vals ", z_vals.shape)
     # from obj-nerf opacity loss    todo render_rays.render(termination, occupancy)
     render_opacity = torch.sum(termination, dim=-1)
     # render_opacity = render_rays.render(termination, occupancy)
     # print("render_opacity ", render_opacity)
     render_depth = render_rays.render(termination, z_vals)
+    # print("render depth ", render_depth.shape)
     # print("render depth ", render_depth[mask_depth & mask_obj])
+    # print("render depth ", render_depth[mask_depth & mask_obj].shape)
+
     # print("gt depth ", gt_depth[mask_depth & mask_obj])
     # print("render_time ", time.time()-render_time)
     diff_sq = (z_vals - render_depth[..., None]) ** 2
@@ -39,11 +46,12 @@ def step_batch_loss(alpha, color, gt_depth, gt_color, sem_labels, mask_depth, z_
     # [mask_depth & mask_obj]
     loss_all = torch.zeros_like(render_depth)
     loss_depth_raw = render_rays.render_loss(render_depth, gt_depth, normalise=False)
-    # print("loss_depth raw ", loss_depth_raw.shape)  # Mxn_per_frame
+    print("loss_depth raw ", loss_depth_raw.shape)  # Mxn_per_frame
     loss_depth = torch.mul(loss_depth_raw, mask_depth & mask_obj)   # keep dim but set invalid element be zero
+    print("loss_depth ", loss_depth)
     loss_all += loss_depth
     loss_depth = render_rays.reduce_batch_loss(loss_depth, var=var, avg=True, mask=mask_depth & mask_obj)
-    # print("loss_depth ", loss_depth)
+    print("loss_depth ", loss_depth)
 
     # 2D color loss: only on obj mask   [mask_obj]
     loss_col_raw = render_rays.render_loss(render_color, gt_color, normalise=False)  # only masked area do col loss
@@ -51,7 +59,7 @@ def step_batch_loss(alpha, color, gt_depth, gt_color, sem_labels, mask_depth, z_
     loss_col = torch.mul(loss_col_raw.sum(-1), mask_obj)
     loss_all += loss_col / 3. * color_scaling
     loss_col = render_rays.reduce_batch_loss(loss_col, var=None, avg=True, mask=mask_obj)
-    # print("loss_col ", loss_col)
+    print("loss_col ", loss_col)
 
     # all samples do sem loss
     # print("sem_labels ", sem_labels.dtype)
@@ -91,8 +99,8 @@ def step_batch_loss(alpha, color, gt_depth, gt_color, sem_labels, mask_depth, z_
         loss_depth += loss_opacity * opacity_scaling
 
     # print("loss_sem ", loss_sem)
-    # print("loss_depth ", loss_depth)
-    # print("loss_col ", loss_col)
+    print("loss_depth ", loss_depth)
+    print("loss_col ", loss_col)
     # print("sem_loss ", sem_loss)
     # print("sem time ", time.time() - render_time)
     # loss for bp
