@@ -152,6 +152,7 @@ if __name__ == "__main__":
                 pe_models.append(obj_k.trainer.pe)
             fc_model, fc_param, fc_buffer = utils.update_vmap(fc_models, optimiser)
             pe_model, pe_param, pe_buffer = utils.update_vmap(pe_models, optimiser)
+            update_vmap_model = False
 
 
         ##################################################################
