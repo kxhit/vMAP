@@ -20,13 +20,13 @@ if __name__ == "__main__":
     ###################################
     # init todo arg parser class
     # hyper param for trainer
-    log_dir = "room0_bmap_vmap"
+    log_dir = "logs/room0_vmap"
     training_device = "cuda:0"
     data_device = "cpu"
     # data_device ="cuda:0"
     # vis_device = "cuda:1"
     imap_mode = False #False
-    training_strategy = "forloop" # "forloop" "vmap"
+    training_strategy = "vmap" # "forloop" "vmap"
     win_size = 5
     n_iter_per_frame = 20
     n_samples_per_frame = 120 // 5 #120 // 5
@@ -36,7 +36,7 @@ if __name__ == "__main__":
     depth_scale = 1/1000.
 
     # param for vis
-    vis_iter_step = 100
+    vis_iter_step = 1000000000
     vis3d = open3d.visualization.Visualizer()
     vis3d.create_window(window_name="3D mesh vis",
                         width=1200,
@@ -114,11 +114,9 @@ if __name__ == "__main__":
             # append new frame info to objs in current view
             for obj_id in obj_ids:
                 obj_id = int(obj_id)
-                obj_mask = obj_id == inst
-                # todo filter out obj_id where mask is too small, move into dataset
                 # convert inst mask to state
                 state = torch.zeros_like(inst, dtype=torch.uint8, device=data_device)
-                state[obj_mask] = 1
+                state[inst == obj_id] = 1
                 state[inst == -1] = 2
                 bbox = bbox_dict[obj_id]    # todo seq
                 if obj_id in obj_dict.keys():
@@ -127,7 +125,7 @@ if __name__ == "__main__":
                     # with performance_measure(f"single append"):
                     scene_obj.append_keyframe(rgb, depth, state, bbox, twc, is_kf=is_kf)
                 else: # init scene_obj
-                    scene_obj = sceneObject(data_device, rgb, depth, state, bbox, twc)
+                    scene_obj = sceneObject(data_device, rgb, depth, state, bbox, twc, intrinsic_open3d)
                     obj_dict.update({obj_id: scene_obj})
                     # params = [scene_obj.trainer.fc_occ_map.parameters(), scene_obj.trainer.pe.parameters()]
                     optimiser.add_param_group({"params": scene_obj.trainer.fc_occ_map.parameters(), "lr": learning_rate, "weight_decay": weight_decay})
@@ -166,11 +164,11 @@ if __name__ == "__main__":
         Batch_N_sampled_z = []
 
         with performance_measure(f"Sampling over {len(obj_dict.keys())} objects,"):
-            for obj_id in obj_dict.keys():
+            for obj_id, obj_k in obj_dict.items():
                 # print("obj_id ", obj_id)
                 # with performance_measure(f"Sampling single objects,"):
                 gt_rgb, gt_depth, valid_depth_mask, obj_mask, input_pcs, sampled_z\
-                    = obj_dict[obj_id].get_training_samples(n_iter_per_frame*win_size, n_samples_per_frame, cam_info.rays_dir_cache)
+                    = obj_k.get_training_samples(n_iter_per_frame*win_size, n_samples_per_frame, cam_info.rays_dir_cache)
                 # merge first two dims, sample_per_frame*num_per_frame
                 Batch_N_gt_depth.append(gt_depth.reshape([gt_depth.shape[0]*gt_depth.shape[1]]))
                 Batch_N_gt_rgb.append(gt_rgb.reshape([gt_rgb.shape[0]*gt_rgb.shape[1], gt_rgb.shape[2]]))
@@ -209,6 +207,7 @@ if __name__ == "__main__":
                 #     image=rgbd,
                 #     intrinsic=intrinsic_open3d,
                 #     extrinsic=T_CW)
+                # input_pc.points = open3d.utility.Vector3dVector(np.array(input_pc.points) - obj_k.obj_center.cpu().numpy())
                 # open3d.visualization.draw_geometries([pc, input_pc])
 
 
@@ -259,9 +258,9 @@ if __name__ == "__main__":
 
                 # step loss
                 batch_loss, _ = loss.step_batch_loss(batch_alpha, batch_color,
-                                     batch_gt_depth, batch_gt_rgb,
-                                     batch_depth_mask, batch_obj_mask,
-                                     batch_sampled_z)
+                                     batch_gt_depth.detach(), batch_gt_rgb.detach(),
+                                     batch_obj_mask.detach(), batch_depth_mask.detach(),
+                                     batch_sampled_z.detach())
                 batch_loss.backward()
                 optimiser.step()
                 optimiser.zero_grad(set_to_none=True)
@@ -271,15 +270,18 @@ if __name__ == "__main__":
         # todo find a better way    # https://github.com/pytorch/functorch/issues/280
         if training_strategy == "vmap":
             with torch.no_grad():
-                for model_id, (obj_id, obj_k) in enumerate(obj_dict.items()):  # only update live one
+                for model_id, (obj_id, obj_k) in enumerate(obj_dict.items()):
                     for i, param in enumerate(obj_k.trainer.fc_occ_map.parameters()):
                         param.copy_(fc_param[i][model_id])
                     for i, param in enumerate(obj_k.trainer.pe.parameters()):
                         param.copy_(pe_param[i][model_id])
 
+        # live vis mesh
         if ((frame_id % vis_iter_step) == 0 or frame_id == dataset_len-1) and frame_id >= 10:
             vis3d.clear_geometries()
             for obj_id, obj_k in obj_dict.items():
+                if obj_id == 0:
+                    continue
                 bound = obj_k.get_bound(intrinsic_open3d)
                 print("bound ", bound)
                 if bound is None:
@@ -287,7 +289,7 @@ if __name__ == "__main__":
                     continue
                 voxel_size = 0.01
                 adaptive_grid_dim = int(np.minimum(np.max(bound.extent)//voxel_size+1, 256))
-                mesh = obj_k.trainer.meshing(bound, grid_dim=adaptive_grid_dim)
+                mesh = obj_k.trainer.meshing(bound, obj_k.obj_center, grid_dim=adaptive_grid_dim)
                 if mesh is None:
                     print("meshing failed obj ", obj_id)
                     continue

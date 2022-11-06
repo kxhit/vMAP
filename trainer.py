@@ -37,7 +37,7 @@ class Trainer:
         self.fc_occ_map.apply(model.init_weights).to(self.device)
         self.pe = embedding.UniDirsEmbed(max_deg=self.n_unidir_funcs, scale=self.obj_scale).to(self.device)
 
-    def meshing(self, bound, grid_dim=256):
+    def meshing(self, bound, obj_center, grid_dim=256):
         occ_range = [-1., 1.]
         range_dist = occ_range[1] - occ_range[0]
         scene_scale_np = bound.extent / (range_dist * 0.9)
@@ -49,6 +49,7 @@ class Trainer:
         transform = torch.from_numpy(transform_np).to(self.device)
         grid_pc = render_rays.make_3D_grid(occ_range=occ_range, dim=grid_dim, device=self.device,
                                            scale=scene_scale, transform=transform).view(-1, 3)
+        grid_pc -= obj_center.to(grid_pc.device)
         ret = self.eval_points(grid_pc)
         if ret is None:
             return None
@@ -69,6 +70,8 @@ class Trainer:
 
         vertices_pts = torch.from_numpy(np.array(mesh.vertices)).float().to(self.device)
         ret = self.eval_points(vertices_pts)
+        if ret is None:
+            return None
         _, color = ret
         mesh_color = color * 255
         vertex_colors = mesh_color.detach().squeeze(0).cpu().numpy().astype(np.uint8)

@@ -103,7 +103,8 @@ class sceneObject:
     TODO fill...
     """
 
-    def __init__(self, device, rgb:torch.tensor, depth:torch.tensor, mask:torch.tensor, bbox_2d:torch.tensor, t_wc:torch.tensor) -> None:
+    def __init__(self, device, rgb:torch.tensor, depth:torch.tensor, mask:torch.tensor, bbox_2d:torch.tensor, t_wc:torch.tensor, intrinsic) -> None:
+        # todo move global config params into args
         self.device = device
 
         assert rgb.shape[:2] == depth.shape
@@ -171,6 +172,24 @@ class sceneObject:
         # 3D boundary
         self.bbox3d = None
         self.pc = []
+
+        # init  obj local frame
+        # self.obj_center = self.init_obj_center(intrinsic, depth, mask, t_wc)
+        self.obj_center = torch.tensor(0.0) # shouldn't make any difference because of frequency embedding
+
+
+    def init_obj_center(self, intrinsic_open3d, depth, mask, t_wc):
+        obj_depth = depth.cpu().clone()
+        obj_depth[mask!=self.this_obj] = 0
+        T_CW = np.linalg.inv(t_wc.cpu().numpy())
+        pc_obj_init = open3d.geometry.PointCloud.create_from_depth_image(
+            depth=open3d.geometry.Image(np.asarray(obj_depth.permute(1,0).numpy(), order="C")),
+            intrinsic=intrinsic_open3d,
+            extrinsic=T_CW,
+            depth_trunc=self.max_bound,
+            depth_scale=1.0)
+        obj_center = torch.from_numpy(np.mean(pc_obj_init.points, axis=0)).float()
+        return obj_center
 
     # @profile
     def append_keyframe(self, rgb:torch.tensor, depth:torch.tensor, mask:torch.tensor, bbox_2d:torch.tensor, t_wc:torch.tensor, is_kf:bool):
@@ -286,9 +305,9 @@ class sceneObject:
         """
 
         # TODO parametrize those vars
-        n_bins_cam2surface = 2
+        n_bins_cam2surface = 1
         n_bins = 9
-        eps = 0.03
+        eps = 0.10
         other_objs_max_eps = 0.02
         # print("max depth ", torch.max(sampled_depth))
         sampled_z = torch.zeros(
@@ -325,7 +344,7 @@ class sceneObject:
             obj_count = obj_mask.count_nonzero()
 
             if obj_count:
-                sampling_method = "stratified"  # stratified or normal
+                sampling_method = "normal"  # stratified or normal
                 if sampling_method == "stratified":
                     sampled_z[obj_mask, n_bins_cam2surface:] = stratified_bins(
                         sampled_depth.view(-1)[obj_mask] - eps, sampled_depth.view(-1)[obj_mask] + eps,
@@ -359,7 +378,8 @@ class sceneObject:
         input_pcs = origins[..., None, None, :] + (dirs_w[:, :, None, :] *
                                                    sampled_z[..., None])
         # todo obj_center
-        obj_labels = (sampled_rgbs[..., -1] == self.this_obj).view(-1)
+        input_pcs -= self.obj_center
+        obj_labels = sampled_rgbs[..., -1].view(-1)
         # todo standard output tensor shape!
         return sampled_rgbs[..., :3], sampled_depth, valid_depth_mask, obj_labels, input_pcs, sampled_z
 

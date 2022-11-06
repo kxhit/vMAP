@@ -6,7 +6,8 @@ mse_loss = torch.nn.MSELoss(reduction="none")
 
 def step_batch_loss(alpha, color, gt_depth, gt_color, sem_labels, mask_depth, z_vals,
                     color_scaling=5.0, opacity_scaling=10.0):
-    mask_obj = sem_labels == 1
+    mask_obj = sem_labels != 0
+    mask_obj = mask_obj.detach()
     # print("mask_depth ", mask_depth.shape)
     # print("mask_obj ", mask_obj.shape)
     # print("z_vals ", z_vals.shape)
@@ -72,18 +73,6 @@ def step_batch_loss(alpha, color, gt_depth, gt_color, sem_labels, mask_depth, z_
     # loss_sem = torch.mul(loss_sem_raw, mask_sem)
     # loss_all += loss_sem * sem_scaling
     # loss_sem = render_rays.reduce_batch_loss(loss_sem, var=None, avg=True, mask=mask_sem)
-
-    # do weak supervision in mask out area
-    # only do extra supervision on background mask out area == gt_occlusion
-    do_sup_maskout = False
-    if do_sup_maskout:
-        scale_mask_out = 1.0
-        gt_occlusion = True # todo debug
-        loss_depth_bg = torch.mul(loss_depth_raw, mask_depth & ~mask_obj & gt_occlusion)
-        loss_all += loss_depth_bg * scale_mask_out
-        loss_depth_bg = render_rays.reduce_batch_loss(loss_depth_bg, var=var, avg=True, mask=mask_depth & ~mask_obj & gt_occlusion)
-
-        loss_depth += loss_depth_bg * scale_mask_out
 
     do_sup_opacity = True  # True
     if do_sup_opacity:
