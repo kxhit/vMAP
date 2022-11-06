@@ -4,13 +4,13 @@ import open3d as o3d
 import numpy as np
 
 def marching_cubes(occupancy, level=0.5):
-    # try:
-    #     vertices, faces, vertex_normals, _ = skimage.measure.marching_cubes_lewiner(    #marching_cubes(
-    #         occupancy, level=level, gradient_direction='ascent')
-    # except (RuntimeError, ValueError):
-    #    return None
-    vertices, faces, vertex_normals, _ = skimage.measure.marching_cubes_lewiner(  # marching_cubes(
-        occupancy, level=level, gradient_direction='ascent')
+    try:
+        vertices, faces, vertex_normals, _ = skimage.measure.marching_cubes_lewiner(    #marching_cubes(
+            occupancy, level=level, gradient_direction='ascent')
+    except (RuntimeError, ValueError):
+       return None
+    # vertices, faces, vertex_normals, _ = skimage.measure.marching_cubes_lewiner(  # marching_cubes(
+    #     occupancy, level=level, gradient_direction='ascent')
     # todo try pytorch3d marching cube to speed up?
     # https://github.com/facebookresearch/pytorch3d/blob/main/pytorch3d/ops/marching_cubes.py
     # vertices, faces = mcubes.marching_cubes(occupancy, level)

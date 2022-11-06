@@ -18,6 +18,7 @@ if __name__ == "__main__":
     ###################################
     # init todo arg parser class
     # hyper param for trainer
+    log_dir = "room0"
     training_device = "cuda:0"
     data_device = "cpu"
     # data_device ="cuda:0"
@@ -100,7 +101,7 @@ if __name__ == "__main__":
     #                          persistent_workers=True)
     dataloader_iterator = iter(dataloader)
 
-    for idx in tqdm(range(dataset_len)):
+    for frame_id in tqdm(range(dataset_len)):
         # get data from dataloader
         sample = next(dataloader_iterator)
         print(sample["depth"].shape)
@@ -262,7 +263,7 @@ if __name__ == "__main__":
                 optimiser.zero_grad(set_to_none=True)
                 print("loss ", batch_loss)
 
-        if (idx % vis_iter_step) == 0 and idx >= 10:
+        if (frame_id % vis_iter_step) == 0 and frame_id >= 10:
             vis3d.clear_geometries()
             for obj_id, obj_k in obj_dict.items():
                 bound = obj_k.get_bound(intrinsic_open3d)
@@ -276,6 +277,12 @@ if __name__ == "__main__":
                 if mesh is None:
                     print("meshing failed obj ", obj_id)
                     continue
+                # save to dir
+                obj_mesh_output = os.path.join(log_dir, "scene_mesh")
+                os.makedirs(obj_mesh_output, exist_ok=True)
+                mesh.export(os.path.join(obj_mesh_output, "frame_{}_obj{}.obj".format(frame_id, str(obj_id))))
+
+                # live vis
                 open3d_mesh = vis.trimesh_to_open3d(mesh)
                 vis3d.add_geometry(open3d_mesh)
                 vis3d.add_geometry(bound)
