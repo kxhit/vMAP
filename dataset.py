@@ -56,7 +56,8 @@ class Replica(Dataset):
         inst_file = os.path.join(self.root_dir, "semantic_instance", "semantic_instance_" + str(idx) + ".png")
         obj_file = os.path.join(self.root_dir, "semantic_class", "semantic_class_" + str(idx) + ".png")
         depth = cv2.imread(depth_file, -1).astype(np.float32).transpose(1,0)
-        image = cv2.imread(rgb_file).astype(np.uint8).transpose(1,0,2)
+        image = cv2.imread(rgb_file).astype(np.uint8)
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB).transpose(1,0,2)
         obj = cv2.imread(obj_file, cv2.IMREAD_UNCHANGED).astype(np.int32).transpose(1,0)   # uint16 -> int32
         inst = cv2.imread(inst_file, cv2.IMREAD_UNCHANGED).astype(np.int32).transpose(1,0)  # uint16 -> int32
 

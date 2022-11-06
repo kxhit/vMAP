@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 from pdb import set_trace
 from time import perf_counter_ns
@@ -6,6 +7,7 @@ from time import perf_counter_ns
 # import scalene
 from tqdm import tqdm
 import trainer
+import open3d
 
 class performance_measure:
 
@@ -54,7 +56,7 @@ def origin_dirs_W(T_WC, dirs_C):
 def stratified_bins(min_depth, max_depth, n_bins, n_rays, type=torch.float32, device = "cpu"):
     # type: (Tensor, Tensor, int, int) -> Tensor
 
-    bin_limits_scale = torch.linspace(0, 1, n_bins, dtype=type, device=device)
+    bin_limits_scale = torch.linspace(0, 1, n_bins+1, dtype=type, device=device)
 
     if not torch.is_tensor(min_depth):
         min_depth = torch.ones(n_rays, dtype=type, device=device) * min_depth
@@ -65,6 +67,7 @@ def stratified_bins(min_depth, max_depth, n_bins, n_rays, type=torch.float32, de
     depth_range = max_depth - min_depth
   
     lower_limits_scale = depth_range[..., None] * bin_limits_scale + min_depth[..., None]
+    lower_limits_scale = lower_limits_scale[:, :-1]
 
     assert lower_limits_scale.shape == (n_rays, n_bins)
 
@@ -117,6 +120,8 @@ class sceneObject:
 
         self.n_keyframes = 1  # Number of keyframes
         self.keyframe_buffer_size = 20
+        self.keyframe_step = 25 # for bg
+        self.frame_cnt = 0  # number of frames taken in
 
         self.bbox = torch.empty(  # obj bounding bounding box in the frame
             self.keyframe_buffer_size,
@@ -163,6 +168,10 @@ class sceneObject:
         # network map
         self.trainer = trainer.Trainer()
 
+        # 3D boundary
+        self.bbox3d = None
+        self.pc = []
+
     # @profile
     def append_keyframe(self, rgb:torch.tensor, depth:torch.tensor, mask:torch.tensor, bbox_2d:torch.tensor, t_wc:torch.tensor, is_kf:bool):
         # todo if kf: append, else: replace
@@ -174,6 +183,9 @@ class sceneObject:
         assert rgb.dtype == torch.uint8
         assert mask.dtype == torch.uint8
         assert depth.dtype == torch.float32
+
+        # every kf_step choose one kf
+        is_kf = self.frame_cnt % self.keyframe_step == 0
 
         if not is_kf:   # not kf, replace
             self.rgbs_batch[self.n_keyframes-1, :, :, self.rgb_idx] = rgb
@@ -194,13 +206,45 @@ class sceneObject:
         if self.n_keyframes == self.keyframe_buffer_size - 1:
             self.n_keyframes -= 1
 
+        self.frame_cnt += 1
+
+    def get_bound(self, intrinsic_open3d):
+        # get 3D boundary from posed depth img
+        pcs = open3d.geometry.PointCloud()
+        for kf_id in range(self.n_keyframes):
+            mask = self.rgbs_batch[kf_id, : , :, self.state_idx].squeeze() == self.this_obj
+            depth = self.depth_batch[kf_id].cpu().numpy().copy()
+            twc = self.t_wc_batch[kf_id].cpu().numpy()
+            depth[~mask] = 0
+            T_CW = np.linalg.inv(twc)
+            pc = open3d.geometry.PointCloud.create_from_depth_image(
+                depth=open3d.geometry.Image(depth),
+                intrinsic=intrinsic_open3d,
+                extrinsic=T_CW,
+            )
+            # self.pc += pc
+            pcs += pc
+
+        # get minimal oriented 3d bbox
+        try:
+            bbox3d = open3d.geometry.OrientedBoundingBox.create_from_points(pcs.points)
+        except RuntimeError:
+            print("too few pcs obj ")
+            # self.pc = []
+            return None
+
+        # self.pc = []
+        return bbox3d
+
+
+
     def get_training_samples(self, n_frames, n_samples, cached_rays_dir):
         # Sample pixels
         keyframe_ids = torch.randint(low=0,
                                      high=self.n_keyframes,
                                      size=(n_frames,),
                                      dtype=torch.long,
-                                     device=self.device)
+                                     device=self.device)    # todo make sure latest 2 frames are sampled
         keyframe_ids = torch.unsqueeze(keyframe_ids, dim=-1)
 
         idx_w = torch.rand(n_frames, n_samples, device=self.device)
@@ -249,7 +293,7 @@ class sceneObject:
         n_bins = 9
         eps = 0.03
         other_objs_max_eps = 0.02
-
+        # print("max depth ", torch.max(sampled_depth))
         sampled_z = torch.zeros(
             sampled_rgbs.shape[0] * sampled_rgbs.shape[1],
             n_bins_cam2surface + n_bins,
@@ -304,7 +348,7 @@ class sceneObject:
                     )
 
             # sampling around depth of other objects
-            other_obj_mask = (sampled_rgbs[..., -1] == self.other_obj).view(-1) & valid_depth_mask
+            other_obj_mask = (sampled_rgbs[..., -1] != self.this_obj).view(-1) & valid_depth_mask
             other_objs_count = other_obj_mask.count_nonzero()
             if other_objs_count:
                 sampled_z[other_obj_mask, n_bins_cam2surface:] = stratified_bins(

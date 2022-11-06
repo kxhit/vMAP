@@ -1,6 +1,13 @@
 import cv2
 import numpy as np
 import torch
+from functorch import combine_state_for_ensemble
+
+def update_vmap(models, optimiser):
+    fmodel, params, buffers = combine_state_for_ensemble(models)
+    [p.requires_grad_() for p in params]
+    optimiser.add_param_group({"params": params})  # imap b l
+    return (fmodel, params, buffers)
 
 def enlarge_bbox(bbox, scale, w, h):
     assert scale >= 0
