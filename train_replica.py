@@ -12,21 +12,24 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 import image_transforms
 import vis
+# vmap
+from functorch import vmap
 
 # todo verify on replica
 if __name__ == "__main__":
     ###################################
     # init todo arg parser class
     # hyper param for trainer
-    log_dir = "room0_imap"
+    log_dir = "room0_bmap_vmap"
     training_device = "cuda:0"
     data_device = "cpu"
     # data_device ="cuda:0"
     # vis_device = "cuda:1"
     imap_mode = False #False
+    training_strategy = "forloop" # "forloop" "vmap"
     win_size = 5
     n_iter_per_frame = 20
-    n_samples_per_frame = 2400 // 5 #120 // 5
+    n_samples_per_frame = 120 // 5 #120 // 5
     n_sample_per_step = n_samples_per_frame * win_size
     min_depth = 0.
     max_depth = 10.
@@ -69,11 +72,6 @@ if __name__ == "__main__":
     learning_rate = 0.001
     weight_decay = 0.013
     optimiser = torch.optim.AdamW([torch.autograd.Variable(torch.tensor(0))], lr=learning_rate, weight_decay=weight_decay)
-
-    # # vmap
-    # from functorch import vmap, combine_state_for_ensemble
-
-
 
     #############################################
     # todo dataloader, dataset
@@ -148,23 +146,18 @@ if __name__ == "__main__":
                             total_params += p.numel()
                     print("total param ", total_params)
 
-        # # todo dynamically add vmap
-        # if update_model:
-        #     fc_models, pe_models = [], []
-        #     for obj_id, obj_k in obj_dict.items():
-        #         fc_models.append(obj_k in.trainer.fc_occ_map)
-        #         pe_models.append(obj_k in.trainer.pe)
-        #     fc_model, fc_param, fc_buffer = update_vmap(fc_models, optimiser)
-        #     pe_model, pe_param, pe_buffer = update_vmap(pe_models, optimiser)
-        ###################################
-        # measure trainable params in total
-        # for obj_id, obj_k in obj_dict.items():
-        #     total_params = sum(p.numel() for p in obj_k.trainer.fc_occ_map.parameters() if p.requires_grad)
-        #     print("total params obj ", obj_id)
+        # dynamically add vmap
+        if training_strategy == "vmap" and update_vmap_model==True:
+            fc_models, pe_models = [], []
+            for obj_id, obj_k in obj_dict.items():  # make sure order doesn't change
+                fc_models.append(obj_k.trainer.fc_occ_map)
+                pe_models.append(obj_k.trainer.pe)
+            fc_model, fc_param, fc_buffer = utils.update_vmap(fc_models, optimiser)
+            pe_model, pe_param, pe_buffer = utils.update_vmap(pe_models, optimiser)
+
 
         ##################################################################
         # training data preperation, get training data for all objs
-        # Batch_N_rets = []
         Batch_N_gt_depth = []
         Batch_N_gt_rgb = []
         Batch_N_depth_mask = []
@@ -172,7 +165,7 @@ if __name__ == "__main__":
         Batch_N_input_pcs = []
         Batch_N_sampled_z = []
 
-        with performance_measure(f"Samling over {len(obj_dict.keys())} objects,"):
+        with performance_measure(f"Sampling over {len(obj_dict.keys())} objects,"):
             for obj_id in obj_dict.keys():
                 # print("obj_id ", obj_id)
                 # with performance_measure(f"Sampling single objects,"):
@@ -240,33 +233,28 @@ if __name__ == "__main__":
                 batch_obj_mask = Batch_N_obj_mask[:, data_idx, ...]
                 batch_sampled_z = Batch_N_sampled_z[:, data_idx, ...]
                 # print("size ", batch_input_pcs.shape)
-                # for loop training
-                batch_alpha = []
-                batch_color = []
-                for k, obj_id in enumerate(obj_dict.keys()):
-                    obj_k = obj_dict[obj_id]
-                    embedding_k = obj_k.trainer.pe(batch_input_pcs[k])
-                    alpha_k, color_k = obj_k.trainer.fc_occ_map(embedding_k)
-                    batch_alpha.append(alpha_k)
-                    batch_color.append(color_k)
+                if training_strategy == "forloop":
+                    # for loop training
+                    batch_alpha = []
+                    batch_color = []
+                    for k, obj_id in enumerate(obj_dict.keys()):
+                        obj_k = obj_dict[obj_id]
+                        embedding_k = obj_k.trainer.pe(batch_input_pcs[k])
+                        alpha_k, color_k = obj_k.trainer.fc_occ_map(embedding_k)
+                        batch_alpha.append(alpha_k)
+                        batch_color.append(color_k)
 
-                batch_alpha = torch.stack(batch_alpha)
-                batch_color = torch.stack(batch_color)
-                # print("batch alpha ", batch_alpha.shape)
-
-                # # batched training
-                # batch_alpha = []
-                # batch_color = []
-                # for k, obj_id in enumerate(obj_dict.keys()):
-                #     obj_k = obj_dict[obj_id]
-                #     embedding_k = obj_k.trainer.pe(batch_input_pcs[k])
-                #     alpha_k, color_k = obj_k.trainer.fc_occ_map(embedding_k)
-                #     batch_alpha.append(alpha_k)
-                #     batch_color.append(color_k)
-                #
-                # batch_alpha = torch.stack(batch_alpha)
-                # batch_color = torch.stack(batch_color)
-                # print("batch alpha ", batch_alpha.shape)
+                    batch_alpha = torch.stack(batch_alpha)
+                    batch_color = torch.stack(batch_color)
+                    # print("batch alpha ", batch_alpha.shape)
+                elif training_strategy == "vmap":
+                    # batched training
+                    batch_embedding = vmap(pe_model)(pe_param, pe_buffer, batch_input_pcs)
+                    batch_alpha, batch_color = vmap(fc_model)(fc_param, fc_buffer, batch_embedding)
+                    print("batch alpha ", batch_alpha.shape)
+                else:
+                    print("training strategy {} is not implemented ".format(training_strategy))
+                    exit(-1)
 
 
                 # step loss
@@ -278,6 +266,16 @@ if __name__ == "__main__":
                 optimiser.step()
                 optimiser.zero_grad(set_to_none=True)
                 print("loss ", batch_loss)
+
+        # update each origin model params
+        # todo find a better way    # https://github.com/pytorch/functorch/issues/280
+        if training_strategy == "vmap":
+            with torch.no_grad():
+                for model_id, (obj_id, obj_k) in enumerate(obj_dict.items()):  # only update live one
+                    for i, param in enumerate(obj_k.trainer.fc_occ_map.parameters()):
+                        param.copy_(fc_param[i][model_id])
+                    for i, param in enumerate(obj_k.trainer.pe.parameters()):
+                        param.copy_(pe_param[i][model_id])
 
         if ((frame_id % vis_iter_step) == 0 or frame_id == dataset_len-1) and frame_id >= 10:
             vis3d.clear_geometries()
