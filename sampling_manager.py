@@ -213,15 +213,12 @@ class sceneObject:
         pcs = open3d.geometry.PointCloud()
         for kf_id in range(self.n_keyframes):
             mask = self.rgbs_batch[kf_id, : , :, self.state_idx].squeeze() == self.this_obj
-            depth = self.depth_batch[kf_id].cpu().numpy().copy()
+            depth = self.depth_batch[kf_id].cpu().clone()
             twc = self.t_wc_batch[kf_id].cpu().numpy()
             depth[~mask] = 0
+            depth = depth.permute(1,0).numpy().astype(np.float32)
             T_CW = np.linalg.inv(twc)
-            pc = open3d.geometry.PointCloud.create_from_depth_image(
-                depth=open3d.geometry.Image(depth),
-                intrinsic=intrinsic_open3d,
-                extrinsic=T_CW,
-            )
+            pc = open3d.geometry.PointCloud.create_from_depth_image(depth=open3d.geometry.Image(np.asarray(depth, order="C")), intrinsic=intrinsic_open3d, extrinsic=T_CW)
             # self.pc += pc
             pcs += pc
 

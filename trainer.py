@@ -10,7 +10,7 @@ class Trainer:
     def __init__(self):
         # todo set param
         self.device = "cuda:0"
-        self.hidden_feature_size = 32   # 256 for iMAP, 128 for seperate bg
+        self.hidden_feature_size = 32 #32   # 256 for iMAP, 128 for seperate bg
         self.obj_scale = 3. # 10 for bg and iMAP
         self.n_unidir_funcs = 5
         self.emb_size1 = 21*(3+1)+3
@@ -45,6 +45,7 @@ class Trainer:
         transform_np = np.eye(4, dtype=np.float32)
         transform_np[:3, 3] = bound.center
         transform_np[:3, :3] = bound.R
+        # transform_np = np.linalg.inv(transform_np)  #
         transform = torch.from_numpy(transform_np).to(self.device)
         grid_pc = render_rays.make_3D_grid(occ_range=occ_range, dim=grid_dim, device=self.device,
                                            scale=scene_scale, transform=transform).view(-1, 3)
@@ -76,7 +77,7 @@ class Trainer:
         return mesh
 
 
-    def eval_points(self, points, chunk_size=1000000):
+    def eval_points(self, points, chunk_size=100000):
         # 256^3 = 16777216
         alpha, color = [], []
         n_chunks = int(np.ceil(points.shape[0] / chunk_size))

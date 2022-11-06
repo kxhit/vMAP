@@ -18,15 +18,15 @@ if __name__ == "__main__":
     ###################################
     # init todo arg parser class
     # hyper param for trainer
-    log_dir = "room0"
+    log_dir = "room0_imap"
     training_device = "cuda:0"
     data_device = "cpu"
     # data_device ="cuda:0"
     # vis_device = "cuda:1"
-    imap_mode = False
+    imap_mode = False #False
     win_size = 5
     n_iter_per_frame = 20
-    n_samples_per_frame = 120 // 5
+    n_samples_per_frame = 2400 // 5 #120 // 5
     n_sample_per_step = n_samples_per_frame * win_size
     min_depth = 0.
     max_depth = 10.
@@ -135,6 +135,18 @@ if __name__ == "__main__":
                     optimiser.add_param_group({"params": scene_obj.trainer.fc_occ_map.parameters(), "lr": learning_rate, "weight_decay": weight_decay})
                     optimiser.add_param_group({"params": scene_obj.trainer.pe.parameters(), "lr": learning_rate, "weight_decay": weight_decay})
                     update_vmap_model = True
+                    print("init new obj ", obj_id)
+                    ###################################
+                    # measure trainable params in total
+                    total_params = 0
+                    obj_k = obj_dict[obj_id]
+                    for p in obj_k.trainer.fc_occ_map.parameters():
+                        if p.requires_grad:
+                            total_params += p.numel()
+                    for p in obj_k.trainer.pe.parameters():
+                        if p.requires_grad:
+                            total_params += p.numel()
+                    print("total param ", total_params)
 
         # # todo dynamically add vmap
         # if update_model:
@@ -144,7 +156,11 @@ if __name__ == "__main__":
         #         pe_models.append(obj_k in.trainer.pe)
         #     fc_model, fc_param, fc_buffer = update_vmap(fc_models, optimiser)
         #     pe_model, pe_param, pe_buffer = update_vmap(pe_models, optimiser)
-
+        ###################################
+        # measure trainable params in total
+        # for obj_id, obj_k in obj_dict.items():
+        #     total_params = sum(p.numel() for p in obj_k.trainer.fc_occ_map.parameters() if p.requires_grad)
+        #     print("total params obj ", obj_id)
 
         ##################################################################
         # training data preperation, get training data for all objs
@@ -263,7 +279,7 @@ if __name__ == "__main__":
                 optimiser.zero_grad(set_to_none=True)
                 print("loss ", batch_loss)
 
-        if (frame_id % vis_iter_step) == 0 and frame_id >= 10:
+        if ((frame_id % vis_iter_step) == 0 or frame_id == dataset_len-1) and frame_id >= 10:
             vis3d.clear_geometries()
             for obj_id, obj_k in obj_dict.items():
                 bound = obj_k.get_bound(intrinsic_open3d)
