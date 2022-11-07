@@ -341,7 +341,8 @@ class sceneObject:
         if invalid_depth_count:
             sampled_z[invalid_depth_mask, :] = stratified_bins(
                 self.min_bound, self.max_bound,
-                n_bins_cam2surface + n_bins, invalid_depth_count)
+                n_bins_cam2surface + n_bins, invalid_depth_count,
+                device=self.device)
 
         # sampling for valid depth rays
         valid_depth_mask = ~invalid_depth_mask
@@ -352,7 +353,7 @@ class sceneObject:
             # Sample between min bound and depth for all pixels with valid depth
             sampled_z[valid_depth_mask, :n_bins_cam2surface] = stratified_bins(
                 self.min_bound, sampled_depth.view(-1)[valid_depth_mask],
-                n_bins_cam2surface, valid_depth_count)
+                n_bins_cam2surface, valid_depth_count, device=self.device)
 
             # sampling around depth for this object
             obj_mask = (sampled_rgbs[..., -1] == self.this_obj).view(-1) & valid_depth_mask # todo obj_mask
@@ -364,14 +365,15 @@ class sceneObject:
                 if sampling_method == "stratified":
                     sampled_z[obj_mask, n_bins_cam2surface:] = stratified_bins(
                         sampled_depth.view(-1)[obj_mask] - eps, sampled_depth.view(-1)[obj_mask] + eps,
-                        n_bins, obj_count)
+                        n_bins, obj_count, device=self.device)
 
                 elif sampling_method == "normal":
                     sampled_z[obj_mask, n_bins_cam2surface:] = normal_bins_sampling(
                         sampled_depth.view(-1)[obj_mask],
                         n_bins,
                         obj_count,
-                        delta=eps)
+                        delta=eps,
+                        device=self.device)
 
                 else:
                     raise (
@@ -386,7 +388,7 @@ class sceneObject:
                 sampled_z[other_obj_mask, n_bins_cam2surface:] = stratified_bins(
                     sampled_depth.view(-1)[other_obj_mask] - eps,
                     sampled_depth.view(-1)[other_obj_mask] + other_objs_max_eps,
-                    n_bins, other_objs_count)
+                    n_bins, other_objs_count, device=self.device)
 
         sampled_z = sampled_z.view(sampled_rgbs.shape[0],
                                    sampled_rgbs.shape[1],
