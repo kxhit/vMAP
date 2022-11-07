@@ -1,0 +1,8 @@
+tqdm
+numpy
+opencv-python
+open3d
+trimesh
+scikit-image
+imgviz
+h5py
