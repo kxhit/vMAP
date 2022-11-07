@@ -123,7 +123,7 @@ class sceneObject:
         self.keyframe_buffer_size = 20
         self.keyframe_step = 25 # for bg
         # todo for live mode
-        self.keyframe_step = 1
+        # self.keyframe_step = 1
         self.kf_id_dict = {live_frame_id:0}
         self.kf_buffer_full = False
         self.frame_cnt = 0  # number of frames taken in
@@ -209,10 +209,10 @@ class sceneObject:
 
         # every kf_step choose one kf
         is_kf = (self.frame_cnt % self.keyframe_step == 0) or self.n_keyframes == 1
-        print("---------------------")
-        print("self.kf_id_dict ", self.kf_id_dict)
-        print("live frame id ", frame_id)
-        print("n_frames ", self.n_keyframes)
+        # print("---------------------")
+        # print("self.kf_id_dict ", self.kf_id_dict)
+        # print("live frame id ", frame_id)
+        # print("n_frames ", self.n_keyframes)
         if not is_kf:   # not kf, replace
             self.rgbs_batch[self.n_keyframes-1, :, :, self.rgb_idx] = rgb
             self.rgbs_batch[self.n_keyframes-1, :, :, self.state_idx] = mask[..., None]
@@ -233,9 +233,6 @@ class sceneObject:
             self.kf_id_dict.update({frame_id: self.n_keyframes})
 
             self.n_keyframes +=1
-
-        print("self.kf_id_dict ", self.kf_id_dict)
-        assert 0 in self.kf_id_dict.values()    # first kf must in the dict
 
         if self.n_keyframes == self.keyframe_buffer_size - 1:
             self.n_keyframes -= 1

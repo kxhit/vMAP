@@ -135,7 +135,7 @@ if __name__ == "__main__":
                     # with performance_measure(f"single append"):
                     scene_obj.append_keyframe(rgb, depth, state, bbox, twc)
                 else: # init scene_obj
-                    scene_obj = sceneObject(data_device, rgb, depth, state, bbox, twc, intrinsic_open3d)
+                    scene_obj = sceneObject(data_device, rgb, depth, state, bbox, twc, intrinsic_open3d, 0)
                     obj_dict.update({obj_id: scene_obj})
                     # params = [scene_obj.trainer.fc_occ_map.parameters(), scene_obj.trainer.pe.parameters()]
                     optimiser.add_param_group({"params": scene_obj.trainer.fc_occ_map.parameters(), "lr": learning_rate, "weight_decay": weight_decay})
@@ -159,11 +159,11 @@ if __name__ == "__main__":
                     # print("total param ", total_params)
 
         # dynamically add vmap
-        with performance_measure(f"add vmap"):
-            if training_strategy == "vmap" and update_vmap_model == True:
-                fc_model, fc_param, fc_buffer = utils.update_vmap(fc_models, optimiser)
-                pe_model, pe_param, pe_buffer = utils.update_vmap(pe_models, optimiser)
-                update_vmap_model = False
+        # with performance_measure(f"add vmap"):
+        if training_strategy == "vmap" and update_vmap_model == True:
+            fc_model, fc_param, fc_buffer = utils.update_vmap(fc_models, optimiser)
+            pe_model, pe_param, pe_buffer = utils.update_vmap(pe_models, optimiser)
+            update_vmap_model = False
 
 
         ##################################################################
@@ -264,9 +264,9 @@ if __name__ == "__main__":
                     # print("batch alpha ", batch_alpha.shape)
                 elif training_strategy == "vmap":
                     # batched training
-                    with performance_measure(f"Batch PE"):
-                        batch_embedding = vmap(pe_model)(pe_param, pe_buffer, batch_input_pcs)
-                        batch_alpha, batch_color = vmap(fc_model)(fc_param, fc_buffer, batch_embedding)
+                    # with performance_measure(f"Batch PE"):
+                    batch_embedding = vmap(pe_model)(pe_param, pe_buffer, batch_input_pcs)
+                    batch_alpha, batch_color = vmap(fc_model)(fc_param, fc_buffer, batch_embedding)
                     # print("batch alpha ", batch_alpha.shape)
                 else:
                     print("training strategy {} is not implemented ".format(training_strategy))
@@ -274,27 +274,27 @@ if __name__ == "__main__":
 
 
                 # step loss
-                with performance_measure(f"Batch LOSS"):
-                    batch_loss, _ = loss.step_batch_loss(batch_alpha, batch_color,
-                                         batch_gt_depth.detach(), batch_gt_rgb.detach(),
-                                         batch_obj_mask.detach(), batch_depth_mask.detach(),
-                                         batch_sampled_z.detach())
-                with performance_measure(f"Backward"):
-                    batch_loss.backward()
-                    optimiser.step()
-                    optimiser.zero_grad(set_to_none=True)
-                    print("loss ", batch_loss.item())
+            # with performance_measure(f"Batch LOSS"):
+                batch_loss, _ = loss.step_batch_loss(batch_alpha, batch_color,
+                                     batch_gt_depth.detach(), batch_gt_rgb.detach(),
+                                     batch_obj_mask.detach(), batch_depth_mask.detach(),
+                                     batch_sampled_z.detach())
+            # with performance_measure(f"Backward"):
+                batch_loss.backward()
+                optimiser.step()
+                optimiser.zero_grad(set_to_none=True)
+                # print("loss ", batch_loss.item())
 
         # update each origin model params
         # todo find a better way    # https://github.com/pytorch/functorch/issues/280
-        with performance_measure(f"updating vmap param"):
-            if training_strategy == "vmap":
-                with torch.no_grad():
-                    for model_id, (obj_id, obj_k) in enumerate(obj_dict.items()):
-                        for i, param in enumerate(obj_k.trainer.fc_occ_map.parameters()):
-                            param.copy_(fc_param[i][model_id])
-                        for i, param in enumerate(obj_k.trainer.pe.parameters()):
-                            param.copy_(pe_param[i][model_id])
+        # with performance_measure(f"updating vmap param"):
+        if training_strategy == "vmap":
+            with torch.no_grad():
+                for model_id, (obj_id, obj_k) in enumerate(obj_dict.items()):
+                    for i, param in enumerate(obj_k.trainer.fc_occ_map.parameters()):
+                        param.copy_(fc_param[i][model_id])
+                    for i, param in enumerate(obj_k.trainer.pe.parameters()):
+                        param.copy_(pe_param[i][model_id])
 
         # live vis mesh
         if ((frame_id % vis_iter_step) == 0 or frame_id == dataset_len-1) and frame_id >= 10:
