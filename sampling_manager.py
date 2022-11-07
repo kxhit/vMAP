@@ -53,7 +53,7 @@ def origin_dirs_W(T_WC, dirs_C):
 # z_vals_scale = lower_limits_scale[:, None] + increments_scale
 
 # @torch.jit.script
-def stratified_bins(min_depth, max_depth, n_bins, n_rays, type=torch.float32, device = "cpu"):
+def stratified_bins(min_depth, max_depth, n_bins, n_rays, type=torch.float32, device = "cuda:0"):
     # type: (Tensor, Tensor, int, int) -> Tensor
 
     bin_limits_scale = torch.linspace(0, 1, n_bins+1, dtype=type, device=device)
@@ -83,7 +83,7 @@ def stratified_bins(min_depth, max_depth, n_bins, n_rays, type=torch.float32, de
     return z_vals_scale
 
 # @torch.jit.script
-def normal_bins_sampling(depth, n_bins, n_rays, delta, device = "cpu"):
+def normal_bins_sampling(depth, n_bins, n_rays, delta, device = "cuda:0"):
     # type: (Tensor, int, int, float) -> Tensor
 
     # device = "cpu"
@@ -103,7 +103,7 @@ class sceneObject:
     TODO fill...
     """
 
-    def __init__(self, device, rgb:torch.tensor, depth:torch.tensor, mask:torch.tensor, bbox_2d:torch.tensor, t_wc:torch.tensor, intrinsic) -> None:
+    def __init__(self, device, rgb:torch.tensor, depth:torch.tensor, mask:torch.tensor, bbox_2d:torch.tensor, t_wc:torch.tensor, intrinsic, live_frame_id) -> None:
         # todo move global config params into args
         self.device = device
 
@@ -122,6 +122,10 @@ class sceneObject:
         self.n_keyframes = 1  # Number of keyframes
         self.keyframe_buffer_size = 20
         self.keyframe_step = 25 # for bg
+        # todo for live mode
+        self.keyframe_step = 1
+        self.kf_id_dict = {live_frame_id:0}
+        self.kf_buffer_full = False
         self.frame_cnt = 0  # number of frames taken in
 
         self.bbox = torch.empty(  # obj bounding bounding box in the frame
@@ -178,21 +182,21 @@ class sceneObject:
         self.obj_center = torch.tensor(0.0) # shouldn't make any difference because of frequency embedding
 
 
-    def init_obj_center(self, intrinsic_open3d, depth, mask, t_wc):
-        obj_depth = depth.cpu().clone()
-        obj_depth[mask!=self.this_obj] = 0
-        T_CW = np.linalg.inv(t_wc.cpu().numpy())
-        pc_obj_init = open3d.geometry.PointCloud.create_from_depth_image(
-            depth=open3d.geometry.Image(np.asarray(obj_depth.permute(1,0).numpy(), order="C")),
-            intrinsic=intrinsic_open3d,
-            extrinsic=T_CW,
-            depth_trunc=self.max_bound,
-            depth_scale=1.0)
-        obj_center = torch.from_numpy(np.mean(pc_obj_init.points, axis=0)).float()
-        return obj_center
+    # def init_obj_center(self, intrinsic_open3d, depth, mask, t_wc):
+    #     obj_depth = depth.cpu().clone()
+    #     obj_depth[mask!=self.this_obj] = 0
+    #     T_CW = np.linalg.inv(t_wc.cpu().numpy())
+    #     pc_obj_init = open3d.geometry.PointCloud.create_from_depth_image(
+    #         depth=open3d.geometry.Image(np.asarray(obj_depth.permute(1,0).numpy(), order="C")),
+    #         intrinsic=intrinsic_open3d,
+    #         extrinsic=T_CW,
+    #         depth_trunc=self.max_bound,
+    #         depth_scale=1.0)
+    #     obj_center = torch.from_numpy(np.mean(pc_obj_init.points, axis=0)).float()
+    #     return obj_center
 
     # @profile
-    def append_keyframe(self, rgb:torch.tensor, depth:torch.tensor, mask:torch.tensor, bbox_2d:torch.tensor, t_wc:torch.tensor, is_kf:bool):
+    def append_keyframe(self, rgb:torch.tensor, depth:torch.tensor, mask:torch.tensor, bbox_2d:torch.tensor, t_wc:torch.tensor, frame_id:np.uint8=1):
         # todo if kf: append, else: replace
         assert rgb.shape[:2] == depth.shape
         assert rgb.shape[:2] == mask.shape
@@ -204,14 +208,19 @@ class sceneObject:
         assert depth.dtype == torch.float32
 
         # every kf_step choose one kf
-        is_kf = self.frame_cnt % self.keyframe_step == 0
-
+        is_kf = (self.frame_cnt % self.keyframe_step == 0) or self.n_keyframes == 1
+        print("---------------------")
+        print("self.kf_id_dict ", self.kf_id_dict)
+        print("live frame id ", frame_id)
+        print("n_frames ", self.n_keyframes)
         if not is_kf:   # not kf, replace
             self.rgbs_batch[self.n_keyframes-1, :, :, self.rgb_idx] = rgb
             self.rgbs_batch[self.n_keyframes-1, :, :, self.state_idx] = mask[..., None]
             self.depth_batch[self.n_keyframes-1, ...] = depth
             self.t_wc_batch[self.n_keyframes-1, ...] = t_wc
             self.bbox[self.n_keyframes-1, ...] = bbox_2d
+            self.kf_id_dict.popitem()   # remove last
+            self.kf_id_dict.update({frame_id: self.n_keyframes-1})
 
         else:   # is kf, add new kf
             self.rgbs_batch[self.n_keyframes, :, :, self.rgb_idx] = rgb
@@ -219,12 +228,20 @@ class sceneObject:
             self.depth_batch[self.n_keyframes, ...] = depth
             self.t_wc_batch[self.n_keyframes, ...] = t_wc
             self.bbox[self.n_keyframes, ...] = bbox_2d
+            if self.kf_buffer_full:
+                self.kf_id_dict.popitem()  # remove last
+            self.kf_id_dict.update({frame_id: self.n_keyframes})
 
             self.n_keyframes +=1
 
+        print("self.kf_id_dict ", self.kf_id_dict)
+        assert 0 in self.kf_id_dict.values()    # first kf must in the dict
+
         if self.n_keyframes == self.keyframe_buffer_size - 1:
             self.n_keyframes -= 1
+            self.kf_buffer_full = True
 
+        # print("self.rgbs_batch.device ", self.rgbs_batch.device)
         self.frame_cnt += 1
 
     def get_bound(self, intrinsic_open3d):
@@ -322,7 +339,6 @@ class sceneObject:
         # sampling for points with invalid depth
         invalid_depth_count = invalid_depth_mask.count_nonzero()
         if invalid_depth_count:
-            print("invalid_depth_count ", invalid_depth_count)
             sampled_z[invalid_depth_mask, :] = stratified_bins(
                 self.min_bound, self.max_bound,
                 n_bins_cam2surface + n_bins, invalid_depth_count)

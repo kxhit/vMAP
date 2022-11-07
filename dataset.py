@@ -17,6 +17,35 @@ import open3d
 import json
 import time
 
+
+def next_live_data(track_to_map_IDT, inited):
+    while True:
+        if track_to_map_IDT.empty():
+            if inited:
+                return None  # no new frame, use kf buffer
+            else:   # blocking until get the first frame
+                continue
+        else:
+            Buffer_data = track_to_map_IDT.get(block=False)
+            break
+
+    # else:
+    #     # get data from rosbag
+    #     Buffer_data = self.ros_nodes.read_rosbag(self.frame_id + 1)
+
+    if Buffer_data is not None:
+        image, depth, T, obj, bbox_dict, kf_id = Buffer_data
+        del Buffer_data
+        T_obj = torch.eye(4)
+        sample = {"image": image, "depth": depth, "T": T, "T_obj": T_obj,
+                  "obj": obj, "bbox_dict": bbox_dict, "frame_id": kf_id}
+
+        return sample
+    else:
+        print("getting nothing?")
+        exit(-1)
+        # return None
+
 class Replica(Dataset):
     def __init__(self,
                  root_dir,
@@ -110,7 +139,7 @@ class Replica(Dataset):
         # todo debug
         T_obj = np.eye(4)
         sample = {"image": image, "depth": depth, "T": T, "T_obj": T_obj,
-                  "obj": obj, "bbox_dict": bbox_dict}
+                  "obj": obj, "bbox_dict": bbox_dict, "frame_id": idx}
 
         if image is None or depth is None:
             print(rgb_file)

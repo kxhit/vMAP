@@ -1,0 +1,82 @@
+{
+    "dataset": {
+        "live": 0,
+        "ims_file": "./data/ScanNet/NICESLAM/scene0059_00",
+        "scene_file": "",
+        "traj_file": "./data/ScanNet/NICESLAM/scene0059_00/pose/",
+        "format": "ScanNet"
+    },
+    "optimizer": {
+        "args":{
+            "lr": 0.001,
+            "weight_decay": 0.013,
+            "pose_lr": 0.01
+        }
+    },
+    "trainer": {
+        "imap_mode": 0,
+        "n_models": 100,
+        "epochs": 1000000,
+        "scale": 1000.0
+    },
+    "render": {
+        "n_rays": 1200,
+        "depth_range": [0.0, 6.0],
+        "n_bins": 9,
+        "n_bins_cam2surface": 1,
+        "bins_fine": 12,
+        "iters_per_kf": 21,
+        "iters_per_frame": 20,
+        "n_per_optim": 120,
+        "kf_dist_th": 0.1,
+        "kf_pixel_ratio": 0.8
+    },
+    "model": {
+        "noise_std": 0.0,
+        "noise_kf": 0.0,
+        "noise_frame": 0.0,
+        "gauss_embed": 0,
+        "n_embed_funcs": 15,
+        "gauss_embed_std": 22,
+        "n_unidir_funcs": 5,
+        "obj_scale": 3.0,
+        "bg_scale": 10.0,
+        "color_scaling": 5.0,
+        "opacity_scaling": 10.0,
+        "do_view_dirs": 0,
+        "gt_traj": 1,
+        "gt_scene": 0,
+        "gt_sem": 1,
+        "depth_eps": 0.1,
+        "keyframe_select": 1,
+        "window_size": 5,
+        "n_rays_is_kf": 400,
+        "do_tsdf": 1,
+        "hidden_layers_block": 1,
+        "hidden_feature_size": 32
+    },
+    "track": {
+        "lr": 0.01,
+        "max_iters": 20,
+        "min_iters": 8,
+        "delta_th": 0.003,
+        "track_color": 1,
+        "n_rays_track": 300,
+        "n_bins_track": 32,
+        "n_bins_fine_track": 12
+    },
+    "camera": {
+        "w": 640,
+        "h": 480,
+        "mw": 10,
+        "mh": 10
+    },
+    "vis": {
+        "n_vis_iter": 100000,
+        "n_bins_fine_vis": 10,
+        "im_vis_reduce": 2,
+        "grid_dim": 256,
+        "live_vis": 1,
+        "live_voxel_size": 0.005
+    }
+}

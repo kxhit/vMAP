@@ -1,0 +1,101 @@
+{
+    "dataset": {
+        "live": 1,
+        "ims_file": "",
+        "scene_file": "",
+        "traj_file": "",
+        "format": ""
+    },
+    "optimizer": {
+        "args":{
+            "lr": 0.0014,
+            "weight_decay": 0.013,
+            "pose_lr": 0.002
+        }
+    },
+    "trainer": {
+        "imap_mode": 0,
+        "n_models": 50,
+        "epochs": 20,
+        "scale": 1.0
+    },
+    "render": {
+        "n_rays": 1200,
+        "depth_range": [0.0, 6.0],
+        "n_bins": 9,
+        "n_bins_cam2surface": 1,
+        "bins_fine": 10,
+        "pyramid_levels": 1,
+        "iters_per_level": 50,
+        "kernel_init": 14,
+        "iters_per_kf": 21,
+        "iters_per_frame": 20,
+        "n_per_optim": 120,
+        "kf_dist_th": 0.1,
+        "kf_pixel_ratio": 0.70
+    },
+    "model": {
+        "noise_std": 0.0,
+        "noise_kf": 0.0,
+        "noise_frame": 0.0,
+        "gauss_embed": 0,
+        "n_embed_funcs": 25,
+        "gauss_embed_std": 175,
+        "n_unidir_funcs": 5,
+        "obj_scale": 1.0,
+        "bg_scale": 5.0,
+        "color_scaling": 5.0,
+        "opacity_scaling": 10.0,
+        "do_view_dirs": 0,
+        "gt_traj": 1,
+        "gt_scene": 0,
+        "gt_sem": 1,
+        "do_occ": 0,
+        "occ_scale": 0.01,
+        "occ_eps": 0.1,
+        "depth_eps": 0.1,
+        "keyframe_select": 1,
+        "window_size": 5,
+        "n_rays_is_kf": 400,
+        "do_tsdf": 0,
+        "hidden_layers_block": 1,
+        "hidden_feature_size": 32
+    },
+    "track": {
+        "lr": 0.004,
+        "max_iters": 4,
+        "min_iters": 3,
+        "delta_th": 0.0025,
+        "track_color": 0,
+        "n_rays_track": 220,
+        "n_bins_track": 42,
+        "n_bins_fine_track": 10
+
+    },
+    "semantics": {
+        "n_classes": 2,
+        "do_hierarchical": 0,
+        "h_levels": 3,
+        "do_names": 0,
+        "label_cam": 0
+    },
+    "camera": {
+        "w": 640,
+        "h": 480,
+        "fx": 517.306408,
+        "fy": 516.469215,
+        "cx": 318.643040,
+        "cy": 255.313989,
+        "mw": 8,
+        "mh": 8,
+        "distortion": [0.2624, -0.9531, -0.0054, 0.0026, 1.1633]
+    },
+    "vis": {
+        "n_vis_iter": 100000,
+        "n_bins_fine_vis": 10,
+        "im_vis_reduce": 3,
+        "grid_dim": 256,
+        "live_vis": 1,
+        "live_voxel_size": 0.005
+    }
+}

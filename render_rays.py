@@ -65,7 +65,7 @@ def render_loss(render, gt_depth, loss="L1", normalise=False):
 def reduce_batch_loss(loss_mat, var=None, avg=True, mask=None, loss_type="L1"):
     mask_num = torch.sum(mask, dim=-1)
     if (mask_num == 0).any():
-        print("notice 0 mask num ", mask_num)
+        # print("notice 0 mask num ", mask_num)
         loss = torch.zeros_like(loss_mat)
         if avg:
             if mask is not None:
