@@ -1,4 +1,5 @@
 import cv2
+import imgviz
 import numpy as np
 import torch
 from functorch import combine_state_for_ensemble
@@ -105,11 +106,11 @@ def check_inside_ratio(pc, bbox3D):
 def track_instance(masks, classes, depth, inst_list, sem_dict, intrinsic_open3d, T_CW, IoU_thresh=0.5, voxel_size=0.1,
                    min_pixels=2000, erode=True, clip_features=None, class_names=None):
     # inst_data = np.zeros_like(depth, dtype=np.int)
-    inst_data_list = []
+    inst_data_dict = {}
     inst_ids = []
     bbox3d_scale = 1.0  # todo 1.0
     for i in range(len(masks)):
-        inst_data = np.zeros_like(depth, dtype=np.int)
+        inst_data = torch.zeros(depth.shape, dtype=torch.int)
         smaller_mask = cv2.erode(masks[i].astype(np.uint8), np.ones((5, 5)), iterations=3).astype(bool)
         inst_depth_small = depth.copy()
         inst_depth_small[~smaller_mask] = 0
@@ -193,14 +194,13 @@ def track_instance(masks, classes, depth, inst_list, sem_dict, intrinsic_open3d,
         if diff_mask is not None:
             inst_data[diff_mask] = -1   # unsure area
         if inst_id not in inst_ids:
-            inst_data_list.append(torch.from_numpy(inst_data))
-            inst_ids.append(inst_id)
+            inst_data_dict.update({inst_id: inst_data})
         else:
             continue
             # idx = inst_ids.index(inst_id)
             # inst_data_list[idx] = inst_data_list[idx] & torch.from_numpy(inst_data) # merge them? todo
     # return inst_data
-    return inst_data_list, inst_ids
+    return inst_data_dict
 
 
 def check_mask_order(obj_masks, depth_np, obj_ids):

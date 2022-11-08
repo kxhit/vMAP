@@ -1,5 +1,6 @@
 import time
 
+import imgviz
 import torch
 import cv2
 import numpy as np
@@ -31,7 +32,7 @@ if __name__ == "__main__":
     # log_dir = "logs/TUM_vmap_swin_noupdate_latest_frame"   # argparse
     # config_file = "./configs/TUM/config_TUM2_live_bMAP.json"    #
 
-    log_dir = "logs/live/table/bmap_latestframe_d320_s0.5"   # argparse
+    log_dir = "logs/live/table/bmap_latestframe_s1.0"   # argparse
     config_file = "./configs/live/config_azure_ros.json"
 
     # log_dir = "logs/replica_vmap_h32"
@@ -60,7 +61,7 @@ if __name__ == "__main__":
     # data_device = "cpu"
     data_device ="cuda:0"
     # vis_device = "cuda:1"
-    max_n_models = 20   #config["trainer"]["n_models"]   # max models number
+    max_n_models = 100   #config["trainer"]["n_models"]   # max models number
     live_mode = config["dataset"]["live"]
     if live_mode:
         keep_live_time = 20.    # after this waiting time, finish training and then eval
@@ -161,34 +162,34 @@ if __name__ == "__main__":
                 sample = next(dataloader_iterator)
             else:
                 sample = dataset.next_live_data(track_to_map_Buffer, frame_id!=0)
-                # # todo update keyframe poses from ORB-SLAM BA
-                # if not kfs_que.empty():
-                #     with performance_measure(f"updating keyframe pose"):
-                #         # Buffer_kfs_updated = render_trainer.kfs_que.get(block=False)
-                #         Buffer_kfs_updated = utils.get_latest_queue(kfs_que)
-                #         # print("Buffer_kfs_updated ", Buffer_kfs_updated)
-                #         if Buffer_kfs_updated is not None:
-                #             kf_update_dict, = Buffer_kfs_updated
-                #             del Buffer_kfs_updated
-                #             # loop over objs
-                #             max_update_id = np.max(list(kf_update_dict.keys()))
-                #             for obj_id, obj_k in obj_dict.items():
-                #                 print("obj ", obj_id)
-                #                 print("kf id dict ", obj_k.kf_id_dict)
-                #                 for live_kf_id, kf_id in obj_k.kf_id_dict.items():
-                #                     if live_kf_id in kf_update_dict.keys():  # update
-                #                         # print("sub ", obj_k.t_wc_batch[kf_id] - kf_update_dict[live_kf_id])
-                #                         obj_k.t_wc_batch[kf_id] = kf_update_dict[live_kf_id].clone()
-                #                         print("update obj {} live_kf_id {} kf_id {}".format(obj_id, live_kf_id, kf_id))
-                #                     # elif (live_kf_id < np.max(list(kf_update_dict.keys()))) and \
-                #                     #         len(obj_k.kf_id_dict.keys()) > obj_k.keyframe_buffer_size:  # not added to BA and reached max kf buffer_size, consider prune
-                #                     #     print("pruned kf ", kf_id)  # todo prune kf
-                #                     #     # models_dict_live[obj_id].render_trainer.kf_info_list.remove(
-                #                     #     #     kf)  # todo check batch size
-                #                     elif live_kf_id > max_update_id:  # not BA yet
-                #                         break
-                #                 # models_dict_live[obj_id].render_trainer.batch_size = len(
-                #                 #     models_dict_live[obj_id].render_trainer.kf_info_list)
+                # todo update keyframe poses from ORB-SLAM BA
+                if not kfs_que.empty():
+                    with performance_measure(f"updating keyframe pose"):
+                        # Buffer_kfs_updated = render_trainer.kfs_que.get(block=False)
+                        Buffer_kfs_updated = utils.get_latest_queue(kfs_que)
+                        # print("Buffer_kfs_updated ", Buffer_kfs_updated)
+                        if Buffer_kfs_updated is not None:
+                            kf_update_dict, = Buffer_kfs_updated
+                            del Buffer_kfs_updated
+                            # loop over objs
+                            max_update_id = np.max(list(kf_update_dict.keys()))
+                            for obj_id, obj_k in obj_dict.items():
+                                print("obj ", obj_id)
+                                print("kf id dict ", obj_k.kf_id_dict)
+                                for live_kf_id, kf_id in obj_k.kf_id_dict.items():
+                                    if live_kf_id in kf_update_dict.keys():  # update
+                                        # print("sub ", obj_k.t_wc_batch[kf_id] - kf_update_dict[live_kf_id])
+                                        obj_k.t_wc_batch[kf_id] = kf_update_dict[live_kf_id].clone()
+                                        print("update obj {} live_kf_id {} kf_id {}".format(obj_id, live_kf_id, kf_id))
+                                    # elif (live_kf_id < np.max(list(kf_update_dict.keys()))) and \
+                                    #         len(obj_k.kf_id_dict.keys()) > obj_k.keyframe_buffer_size:  # not added to BA and reached max kf buffer_size, consider prune
+                                    #     print("pruned kf ", kf_id)  # todo prune kf
+                                    #     # models_dict_live[obj_id].render_trainer.kf_info_list.remove(
+                                    #     #     kf)  # todo check batch size
+                                    elif live_kf_id > max_update_id:  # not BA yet
+                                        break
+                                # models_dict_live[obj_id].render_trainer.batch_size = len(
+                                #     models_dict_live[obj_id].render_trainer.kf_info_list)
         if sample is not None:  # new frame
             last_frame_time = time.time()
             with performance_measure(f"Appending data"):
@@ -204,10 +205,10 @@ if __name__ == "__main__":
                     inst = sample["obj"].to(data_device)
                     obj_ids = torch.unique(inst)
                 else:
-                    inst_data_list, inst_ids = sample["obj"]
-                    obj_ids = set(inst_ids)
+                    inst_data_dict = sample["obj"]
+                    obj_ids = inst_data_dict.keys()
                 # append new frame info to objs in current view
-                for i, obj_id in enumerate(obj_ids):
+                for obj_id in obj_ids:
                     if obj_id == -1:    # unsured area
                         continue
                     obj_id = int(obj_id)
@@ -217,7 +218,10 @@ if __name__ == "__main__":
                         state[inst == obj_id] = 1
                         state[inst == -1] = 2
                     else:
-                        inst_mask = inst_data_list[i].permute(1,0)
+                        inst_mask = inst_data_dict[obj_id].permute(1,0)
+                        label_list = torch.unique(inst_mask).tolist()
+                        assert len(label_list) <= 3
+                        assert obj_id in label_list
                         state = torch.zeros_like(inst_mask, dtype=torch.uint8, device=data_device)
                         state[inst_mask == obj_id] = 1
                         state[inst_mask == -1] = 2

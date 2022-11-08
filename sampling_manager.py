@@ -1,3 +1,4 @@
+import queue
 import random
 
 import numpy as np
@@ -10,6 +11,7 @@ from time import perf_counter_ns
 from tqdm import tqdm
 import trainer
 import open3d
+from bidict import bidict
 
 class performance_measure:
 
@@ -124,16 +126,18 @@ class sceneObject:
         self.max_bound = self.config["render"]["depth_range"][1]
 
         self.n_keyframes = 1  # Number of keyframes
+        self.kf_pointer = None
         self.keyframe_buffer_size = 20 #20 10
         self.live_mode = bool(self.config["dataset"]["live"])
         if self.live_mode:
-            self.keyframe_step = 1
+            self.keyframe_step = 10
         else:
             self.keyframe_step = 25 # for bg
 
-        self.kf_id_dict = {live_frame_id:0}
+        self.kf_id_dict = bidict({live_frame_id:0})
         self.kf_buffer_full = False
         self.frame_cnt = 0  # number of frames taken in
+        self.lastest_kf_queue = []
 
         self.bbox = torch.empty(  # obj bounding bounding box in the frame
             self.keyframe_buffer_size,
@@ -220,48 +224,49 @@ class sceneObject:
         # print("self.kf_id_dict ", self.kf_id_dict)
         # print("live frame id ", frame_id)
         # print("n_frames ", self.n_keyframes)
-        if not is_kf:   # not kf, replace
-            self.rgbs_batch[self.n_keyframes-1, :, :, self.rgb_idx] = rgb
-            self.rgbs_batch[self.n_keyframes-1, :, :, self.state_idx] = mask[..., None]
-            self.depth_batch[self.n_keyframes-1, ...] = depth
-            self.t_wc_batch[self.n_keyframes-1, ...] = t_wc
-            self.bbox[self.n_keyframes-1, ...] = bbox_2d
-            self.kf_id_dict.popitem()   # remove last
-            self.kf_id_dict.update({frame_id: self.n_keyframes-1})
+        if self.n_keyframes == self.keyframe_buffer_size - 1:  # kf buffer full, need to prune
+            self.kf_buffer_full = True
+            if self.kf_pointer is None:
+                self.kf_pointer = self.n_keyframes
 
-        else:   # is kf, add new kf
-            # self.rgbs_batch[self.n_keyframes, :, :, self.rgb_idx] = rgb
-            # self.rgbs_batch[self.n_keyframes, :, :, self.state_idx] = mask[..., None]
-            # self.depth_batch[self.n_keyframes, ...] = depth
-            # self.t_wc_batch[self.n_keyframes, ...] = t_wc
-            # self.bbox[self.n_keyframes, ...] = bbox_2d
-            # if self.kf_buffer_full:
-            #     self.kf_id_dict.popitem()  # remove last
-            # self.kf_id_dict.update({frame_id: self.n_keyframes})
+            self.rgbs_batch[self.kf_pointer, :, :, self.rgb_idx] = rgb
+            self.rgbs_batch[self.kf_pointer, :, :, self.state_idx] = mask[..., None]
+            self.depth_batch[self.kf_pointer, ...] = depth
+            self.t_wc_batch[self.kf_pointer, ...] = t_wc
+            self.bbox[self.kf_pointer, ...] = bbox_2d
+            self.kf_id_dict.inv[self.kf_pointer] = frame_id
 
-            if self.n_keyframes == self.keyframe_buffer_size - 1:  # kf buffer full, need to prune
-                self.kf_buffer_full = True
+            if is_kf:
+                self.lastest_kf_queue.append(self.kf_pointer)
                 pruned_frame_id, pruned_kf_id = self.prune_keyframe()
-                self.kf_id_dict.pop(pruned_frame_id)  # remove the pruned kf, pruned_kf_id
-                self.kf_id_dict.update({pruned_frame_id: pruned_kf_id})
-                kf_pointer = pruned_kf_id
-            else:   # not full
-                kf_pointer = self.n_keyframes
-                self.kf_id_dict.update({frame_id: self.n_keyframes})
-                self.n_keyframes +=1
-            self.rgbs_batch[kf_pointer, :, :, self.rgb_idx] = rgb
-            self.rgbs_batch[kf_pointer, :, :, self.state_idx] = mask[..., None]
-            self.depth_batch[kf_pointer, ...] = depth
-            self.t_wc_batch[kf_pointer, ...] = t_wc
-            self.bbox[kf_pointer, ...] = bbox_2d
+                self.kf_pointer = pruned_kf_id
+
+        else:
+            if not is_kf:   # not kf, replace
+                self.rgbs_batch[self.n_keyframes-1, :, :, self.rgb_idx] = rgb
+                self.rgbs_batch[self.n_keyframes-1, :, :, self.state_idx] = mask[..., None]
+                self.depth_batch[self.n_keyframes-1, ...] = depth
+                self.t_wc_batch[self.n_keyframes-1, ...] = t_wc
+                self.bbox[self.n_keyframes-1, ...] = bbox_2d
+                self.kf_id_dict.inv[self.n_keyframes-1] = frame_id
+            else:   # is kf, add new kf
+                self.kf_id_dict[frame_id] = self.n_keyframes
+                self.rgbs_batch[self.n_keyframes, :, :, self.rgb_idx] = rgb
+                self.rgbs_batch[self.n_keyframes, :, :, self.state_idx] = mask[..., None]
+                self.depth_batch[self.n_keyframes, ...] = depth
+                self.t_wc_batch[self.n_keyframes, ...] = t_wc
+                self.bbox[self.n_keyframes, ...] = bbox_2d
+                self.lastest_kf_queue.append(self.n_keyframes)
+                self.n_keyframes += 1
 
         # print("self.kf_id_dic ", self.kf_id_dict)
         self.frame_cnt += 1
+        if len(self.lastest_kf_queue) > 2:  # keep latest two frames
+            self.lastest_kf_queue = self.lastest_kf_queue[-2:]
 
     def prune_keyframe(self):
         # simple strategy to prune, randomly choose
-        # pruned_kf_id = torch.randint(0, self.n_keyframes, [1])
-        key, value = random.choice(list(self.kf_id_dict.items()))
+        key, value = random.choice(list(self.kf_id_dict.items())[:-2])  # do not prune latest two frames
         return key, value
 
     def get_bound(self, intrinsic_open3d):

@@ -160,16 +160,10 @@ class Tracking:
         #     return
         ros_time = time.time()
         kf_id = msg.id
-        if self.sub_topic == "latest_frame":
-            if self.prev_kf_id is None:
-                self.prev_kf_id = 0
-            kf_id = self.prev_kf_id + 1
-            self.prev_kf_id += 1
-        else:   # still the same kf, skip
-            if kf_id == self.prev_kf_id:
-                return
-            else:
-                self.prev_kf_id = kf_id
+        if kf_id == self.prev_kf_id:
+            return
+        else:
+            self.prev_kf_id = kf_id
         rgb_np = self.cv_bridge.imgmsg_to_cv2(msg.rgb, "rgb8")   # rgb8
         depth_np = self.cv_bridge.imgmsg_to_cv2(msg.depth, "passthrough")
         depth_np = np.nan_to_num(depth_np, nan=0.0)
@@ -222,7 +216,10 @@ class Tracking:
             masks = list(np.asarray(results.pred_masks))
             # masks = results.pred_masks.tolist()
             print("detect time ", time.time() - detect_time)
-
+            # overlap_mask = torch.from_numpy(np.asarray(results.pred_masks)).sum(dim=0)
+            # vis_overlap = imgviz.label2rgb(overlap_mask.numpy())
+            # cv2.imshow("overlap", vis_overlap)
+            # cv2.waitKey(1)
             depth_np[(depth_np > self.max_depth) | (depth_np < self.min_depth)] = 0
 
             track_instance_time = time.time()
@@ -231,20 +228,16 @@ class Tracking:
             #                            T_CW, voxel_size=0.01, min_pixels=self.min_pixels, erode=False,
             #                            clip_features=self.clip_features,
             #                            class_names=self.class_names)
-            inst_data_list, inst_ids = track_instance(masks, classes, depth_np[0], self.inst_list, self.sem_dict,
+            inst_data_dict = track_instance(masks, classes, depth_np[0], self.inst_list, self.sem_dict,
                                        self.intrinsic_open3d,
                                        T_CW, voxel_size=0.01, min_pixels=self.min_pixels, erode=False,
                                        clip_features=self.clip_features,
                                        class_names=self.class_names)
-            # inst_data = check_mask_order(inst_list, depth_np[0], inst_ids)
-            assert len(inst_ids) == len(set(inst_ids))
             print("track instance time ", time.time()-track_instance_time)
-            for i, obj_id in enumerate(set(inst_ids)):
-                mask = inst_data_list[i]
+            for obj_id, mask in (inst_data_dict.items()):
                 bbox2d = get_bbox2d(mask.numpy(), bbox_scale=self.bbox_scale)
                 if bbox2d is None:
-                    inst_data_list.remove(mask)
-                    inst_ids.remove(obj_id)# delete
+                    inst_data_dict.remove(obj_id)   # delete
                     continue
                 # bbox_dict.update({int(obj_id): torch.from_numpy(np.array(bbox2d).reshape(1, -1))})  # batch format
                 bbox_dict.update({int(obj_id): torch.from_numpy(np.array([bbox2d[0], bbox2d[2], bbox2d[1], bbox2d[3]]))})   # bbox order
@@ -263,26 +256,33 @@ class Tracking:
 
             # viz detection
             # frame = mmcv.bgr2rgb(frame)
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            alpha = 0.6
-            color = None
-            if color is None:
-                random_colors = np.random.randint(0, 255, (len(masks), 3))
-                color = [tuple(c) for c in random_colors]
-                color = np.array(color, dtype=np.uint8)
-            for i, mask in enumerate(masks):
-                color_mask = color[i]
-                frame[mask] = frame[mask] * (1 - alpha) + color_mask * alpha
-            cv2.imshow("detection", frame)
-            # cv2.imshow("merged", imgviz.label2rgb(inst_data, colormap=self.inst_color_map))
-            cv2.waitKey(1)
+            # frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            # alpha = 0.6
+            # color = None
+            # if color is None:
+            #     random_colors = np.random.randint(0, 255, (len(masks), 3))
+            #     color = [tuple(c) for c in random_colors]
+            #     color = np.array(color, dtype=np.uint8)
+            # for i, mask in enumerate(masks):
+            #     color_mask = color[i]
+            #     frame[mask] = frame[mask] * (1 - alpha) + color_mask * alpha
+            # cv2.imshow("detection", frame)
+            # # cv2.imshow("merged", imgviz.label2rgb(inst_data, colormap=self.inst_color_map))
+            # cv2.waitKey(1)
 
+            overlap_mask = torch.stack(list(inst_data_dict.values())).sum(dim=0)
+            vis_overlap = imgviz.label2rgb(overlap_mask.numpy())
+            cv2.imshow("overlap merged", vis_overlap)
+            cv2.waitKey(1)
         # send data to mapping -------------------------------------------
         rgb = torch.from_numpy(rgb_np[0]).permute(1,0,2)
         depth = torch.from_numpy(depth_np[0]).permute(1,0)
         twc = torch.from_numpy(camera_transform[0])
         # inst = torch.from_numpy(obj_np[0]).permute(1,0)
-        inst = (inst_data_list, inst_ids)
+        if self.imap_mode:
+            inst = torch.from_numpy(obj_np)
+        else:
+            inst = inst_data_dict.copy()
         try:
             self.map_que.put((rgb, depth, twc, inst, bbox_dict.copy(), kf_id), block=False)
             print("`````````````````````````````````````````")

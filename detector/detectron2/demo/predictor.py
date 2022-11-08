@@ -48,7 +48,7 @@ def setup_cfg(
     cfg.MODEL.ROI_BOX_HEAD.ZEROSHOT_WEIGHT_PATH = 'rand' # load later
     # if not args.pred_all_class:
     #     cfg.MODEL.ROI_HEADS.ONE_CLASS_PER_PROPOSAL = True
-    cfg.MODEL.DEVICE = "cuda:0"  # todo set detector GPU
+    cfg.MODEL.DEVICE = "cuda:1"  # todo set detector GPU
     cfg.freeze()
     return cfg
 
