@@ -24,7 +24,7 @@ if __name__ == "__main__":
     # torch.backends.cudnn.allow_tf32 = True
     # init todo arg parser class
     # hyper param for trainer
-    log_dir = "logs/room0_vmap_kf10"
+    log_dir = "logs/room0_vmap_kf10_bg32"
     training_device = "cuda:0"
     # data_device = "cpu"
     data_device ="cuda:0"
@@ -76,6 +76,9 @@ if __name__ == "__main__":
     learning_rate = 0.001
     weight_decay = 0.013
     optimiser = torch.optim.AdamW([torch.autograd.Variable(torch.tensor(0))], lr=learning_rate, weight_decay=weight_decay)
+    AMP = False
+    if AMP:
+        scaler = torch.cuda.amp.GradScaler()    # amp https://pytorch.org/blog/accelerating-training-on-nvidia-gpus-with-pytorch-automatic-mixed-precision/
 
     #############################################
     # todo dataloader, dataset
@@ -280,8 +283,18 @@ if __name__ == "__main__":
                                      batch_obj_mask.detach(), batch_depth_mask.detach(),
                                      batch_sampled_z.detach())
             # with performance_measure(f"Backward"):
-                batch_loss.backward()
-                optimiser.step()
+                if AMP:
+                    # Scales the loss, and calls backward()
+                    # to create scaled gradients
+                    scaler.scale(batch_loss).backward()
+                    # Unscales gradients and calls
+                    # or skips optimizer.step()
+                    scaler.step(optimiser)
+                    # Updates the scale for next iteration
+                    scaler.update()
+                else:
+                    batch_loss.backward()
+                    optimiser.step()
                 optimiser.zero_grad(set_to_none=True)
                 # print("loss ", batch_loss.item())
 
@@ -300,8 +313,8 @@ if __name__ == "__main__":
         if ((frame_id % vis_iter_step) == 0 or frame_id == dataset_len-1) and frame_id >= 10:
             vis3d.clear_geometries()
             for obj_id, obj_k in obj_dict.items():
-                if obj_id == 0:
-                    continue
+                # if obj_id == 0:
+                #     continue
                 bound = obj_k.get_bound(intrinsic_open3d)
                 print("bound ", bound)
                 if bound is None:
