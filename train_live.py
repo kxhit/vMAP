@@ -15,6 +15,7 @@ from torchvision import transforms
 import image_transforms
 import vis
 import json
+from pathlib import Path
 
 # vmap
 from functorch import vmap
@@ -27,26 +28,54 @@ if __name__ == "__main__":
     # torch.backends.cuda.matmul.allow_tf32 = True
     # torch.backends.cudnn.allow_tf32 = True
     # init todo arg parser class
+    # log_dir = "logs/TUM_vmap_swin_noupdate_latest_frame"   # argparse
+    # config_file = "./configs/TUM/config_TUM2_live_bMAP.json"    #
+
+    log_dir = "logs/live/table/bmap_latestframe_d320_s0.5"   # argparse
+    config_file = "./configs/live/config_azure_ros.json"
+
+    # log_dir = "logs/replica_vmap_h32"
+    # config_file = "./configs/Replica/config_replica_room0_bMAP.json"
+
+    # log_dir = "logs/replica_imap"
+    # config_file = "./configs/Replica/config_replica_room0_iMAP.json"
+
+    # setting params
+    with open(config_file) as json_file:
+        config = json.load(json_file)
+    max_depth = config["render"]["depth_range"][1]
+    min_depth = config["render"]["depth_range"][0]
+    mh = config["camera"]["mh"]
+    mw = config["camera"]["mw"]
+    height = config["camera"]["h"]
+    width = config["camera"]["w"]
+    H = height - 2 * mh
+    W = width - 2 * mw
+    fx = config["camera"]["fx"]
+    fy = config["camera"]["fy"]
+    cx = config["camera"]["cx"] - mw
+    cy = config["camera"]["cy"] - mh
     # hyper param for trainer
-    log_dir = "logs/TUM_vmap_swin_min200_box1.05"
     training_device = "cuda:0"
     # data_device = "cpu"
     data_device ="cuda:0"
     # vis_device = "cuda:1"
-    max_n_models = 50   # max models number
-    live_mode = True
+    max_n_models = 20   #config["trainer"]["n_models"]   # max models number
+    live_mode = config["dataset"]["live"]
     if live_mode:
         keep_live_time = 20.    # after this waiting time, finish training and then eval
 
-    imap_mode = False #False
+    imap_mode = config["trainer"]["imap_mode"] #False
     training_strategy = "vmap" # "forloop" "vmap"
-    win_size = 5
-    n_iter_per_frame = 20
-    n_samples_per_frame = 120 // 5 #120 // 5
+    win_size = config["model"]["window_size"]
+    n_iter_per_frame = config["render"]["iters_per_frame"]
+    n_per_optim = config["render"]["n_per_optim"]
+    n_samples_per_frame = n_per_optim // win_size #120 // 5
     n_sample_per_step = n_samples_per_frame * win_size
-    min_depth = 0.
-    max_depth = 10.
-    depth_scale = 1/1000.
+    depth_scale = 1 / config["trainer"]["scale"]
+
+    learning_rate = config["optimizer"]["args"]["lr"]
+    weight_decay = config["optimizer"]["args"]["weight_decay"]
 
     # param for vis
     vis_iter_step = 1000000000
@@ -58,35 +87,7 @@ if __name__ == "__main__":
     view_ctl = vis3d.get_view_control()
     view_ctl.set_constant_z_far(10.)
 
-    # param for dataset
-    bbox_scale = 0.2
-
-    if live_mode:
-        config_file = "./configs/TUM/config_TUM2_live_bMAP.json"
-        with open(config_file) as json_file:
-            config = json.load(json_file)
-        # camera
-        max_bound = config["render"]["depth_range"][1]
-        min_bound = config["render"]["depth_range"][0]
-        mh = config["camera"]["mh"]
-        mw = config["camera"]["mw"]
-        height = config["camera"]["h"]
-        width = config["camera"]["w"]
-        H = height - 2 * mh
-        W = width - 2 * mw
-        fx = config["camera"]["fx"]
-        fy = config["camera"]["fy"]
-        cx = config["camera"]["cx"] - mw
-        cy = config["camera"]["cy"] - mh
-    else:
-        # camera
-        W = 1200
-        H = 680
-        fx = 600.0
-        fy = 600.0
-        cx = 599.5
-        cy = 339.5
-
+    # set camera
     cam_info = cameraInfo(W, H, fx, fy, cx, cy, data_device)
     intrinsic_open3d = open3d.camera.PinholeCameraIntrinsic(
         width=W,
@@ -100,8 +101,9 @@ if __name__ == "__main__":
     obj_dict = {}
 
     # init for training
-    learning_rate = 0.001
-    weight_decay = 0.013
+    AMP = False
+    if AMP:
+        scaler = torch.cuda.amp.GradScaler()  # amp https://pytorch.org/blog/accelerating-training-on-nvidia-gpus-with-pytorch-automatic-mixed-precision/
     optimiser = torch.optim.AdamW([torch.autograd.Variable(torch.tensor(0))], lr=learning_rate, weight_decay=weight_decay)
 
     #############################################
@@ -111,10 +113,8 @@ if __name__ == "__main__":
         dataset_len = 1000000
     else:
         # get one frame
-        root_dir = "/home/xin/data/Replica/replica_v1/room_0/imap/00/"
+        root_dir = os.path.join(str(Path.home()), config["dataset"]["ims_file"])   #root_dir = "/home/xin/data/Replica/replica_v1/room_0/imap/00/"
         pose_file = os.path.join(root_dir, "traj_w_c.txt")
-        pose_all = np.loadtxt(pose_file, delimiter=" ").reshape([-1, 4, 4]).astype(np.float32)
-        dataset_len = pose_all.shape[0]
 
     # init data stream
     if not live_mode:
@@ -135,6 +135,7 @@ if __name__ == "__main__":
                                  worker_init_fn=None, generator=None, prefetch_factor=2,
                                  persistent_workers=True)
         dataloader_iterator = iter(dataloader)
+        dataset_len = len(dataloader)
     else:
         # init ros node
         torch.multiprocessing.set_start_method('spawn')  # spawn
@@ -160,55 +161,66 @@ if __name__ == "__main__":
                 sample = next(dataloader_iterator)
             else:
                 sample = dataset.next_live_data(track_to_map_Buffer, frame_id!=0)
-                # todo update keyframe poses from ORB-SLAM BA
-                if not kfs_que.empty():
-                    with performance_measure(f"updating keyframe pose"):
-                        # Buffer_kfs_updated = render_trainer.kfs_que.get(block=False)
-                        Buffer_kfs_updated = utils.get_latest_queue(kfs_que)
-                        # print("Buffer_kfs_updated ", Buffer_kfs_updated)
-                        if Buffer_kfs_updated is not None:
-                            kf_update_dict, = Buffer_kfs_updated
-                            del Buffer_kfs_updated
-                            # loop over objs
-                            for obj_id, obj_k in obj_dict.items():
-                                print("obj ", obj_id)
-                                print("kf id dict ", obj_k.kf_id_dict)
-                                for live_kf_id, kf_id in obj_k.kf_id_dict.items():
-                                    if live_kf_id in kf_update_dict.keys():  # update
-                                        # print("sub ", obj_k.t_wc_batch[kf_id] - kf_update_dict[live_kf_id])
-                                        obj_k.t_wc_batch[kf_id] = kf_update_dict[live_kf_id].clone()
-                                        print("update obj {} live_kf_id {} kf_id {}".format(obj_id, live_kf_id, kf_id))
-                                    # elif (live_kf_id < np.max(list(kf_update_dict.keys()))) and \
-                                    #         len(obj_k.kf_id_dict.keys()) > obj_k.keyframe_buffer_size:  # not added to BA and reached max kf buffer_size, consider prune
-                                    #     print("pruned kf ", kf_id)  # todo prune kf
-                                    #     # models_dict_live[obj_id].render_trainer.kf_info_list.remove(
-                                    #     #     kf)  # todo check batch size
-                                    elif live_kf_id > np.max(list(kf_update_dict.keys())):  # not BA yet
-                                        break
-                                # models_dict_live[obj_id].render_trainer.batch_size = len(
-                                #     models_dict_live[obj_id].render_trainer.kf_info_list)
+                # # todo update keyframe poses from ORB-SLAM BA
+                # if not kfs_que.empty():
+                #     with performance_measure(f"updating keyframe pose"):
+                #         # Buffer_kfs_updated = render_trainer.kfs_que.get(block=False)
+                #         Buffer_kfs_updated = utils.get_latest_queue(kfs_que)
+                #         # print("Buffer_kfs_updated ", Buffer_kfs_updated)
+                #         if Buffer_kfs_updated is not None:
+                #             kf_update_dict, = Buffer_kfs_updated
+                #             del Buffer_kfs_updated
+                #             # loop over objs
+                #             max_update_id = np.max(list(kf_update_dict.keys()))
+                #             for obj_id, obj_k in obj_dict.items():
+                #                 print("obj ", obj_id)
+                #                 print("kf id dict ", obj_k.kf_id_dict)
+                #                 for live_kf_id, kf_id in obj_k.kf_id_dict.items():
+                #                     if live_kf_id in kf_update_dict.keys():  # update
+                #                         # print("sub ", obj_k.t_wc_batch[kf_id] - kf_update_dict[live_kf_id])
+                #                         obj_k.t_wc_batch[kf_id] = kf_update_dict[live_kf_id].clone()
+                #                         print("update obj {} live_kf_id {} kf_id {}".format(obj_id, live_kf_id, kf_id))
+                #                     # elif (live_kf_id < np.max(list(kf_update_dict.keys()))) and \
+                #                     #         len(obj_k.kf_id_dict.keys()) > obj_k.keyframe_buffer_size:  # not added to BA and reached max kf buffer_size, consider prune
+                #                     #     print("pruned kf ", kf_id)  # todo prune kf
+                #                     #     # models_dict_live[obj_id].render_trainer.kf_info_list.remove(
+                #                     #     #     kf)  # todo check batch size
+                #                     elif live_kf_id > max_update_id:  # not BA yet
+                #                         break
+                #                 # models_dict_live[obj_id].render_trainer.batch_size = len(
+                #                 #     models_dict_live[obj_id].render_trainer.kf_info_list)
         if sample is not None:  # new frame
             last_frame_time = time.time()
             with performance_measure(f"Appending data"):
                 rgb = sample["image"].to(data_device)
                 depth = sample["depth"].to(data_device)
                 twc = sample["T"].to(data_device)
-                inst = sample["obj"].to(data_device)
                 bbox_dict = sample["bbox_dict"]
                 if "frame_id" in sample.keys():
                     live_frame_id = sample["frame_id"]
                 else:
                     live_frame_id = frame_id
-                obj_ids = torch.unique(inst)
+                if not live_mode:
+                    inst = sample["obj"].to(data_device)
+                    obj_ids = torch.unique(inst)
+                else:
+                    inst_data_list, inst_ids = sample["obj"]
+                    obj_ids = set(inst_ids)
                 # append new frame info to objs in current view
-                for obj_id in obj_ids:
+                for i, obj_id in enumerate(obj_ids):
                     if obj_id == -1:    # unsured area
                         continue
                     obj_id = int(obj_id)
                     # convert inst mask to state
-                    state = torch.zeros_like(inst, dtype=torch.uint8, device=data_device)
-                    state[inst == obj_id] = 1
-                    state[inst == -1] = 2
+                    if not live_mode:
+                        state = torch.zeros_like(inst, dtype=torch.uint8, device=data_device)
+                        state[inst == obj_id] = 1
+                        state[inst == -1] = 2
+                    else:
+                        inst_mask = inst_data_list[i].permute(1,0)
+                        state = torch.zeros_like(inst_mask, dtype=torch.uint8, device=data_device)
+                        state[inst_mask == obj_id] = 1
+                        state[inst_mask == -1] = 2
                     bbox = bbox_dict[obj_id]
                     if obj_id in obj_dict.keys():
                         scene_obj = obj_dict[obj_id]
@@ -218,7 +230,7 @@ if __name__ == "__main__":
                         if len(obj_dict.keys()) >= max_n_models:
                             print("models full!!!! current num ", len(obj_dict.keys()))
                             continue
-                        scene_obj = sceneObject(data_device, rgb, depth, state, bbox, twc, None, live_frame_id)
+                        scene_obj = sceneObject(config, obj_id, data_device, rgb, depth, state, bbox, twc, None, live_frame_id)
                         obj_dict.update({obj_id: scene_obj})
                         # params = [scene_obj.trainer.fc_occ_map.parameters(), scene_obj.trainer.pe.parameters()]
                         optimiser.add_param_group({"params": scene_obj.trainer.fc_occ_map.parameters(), "lr": learning_rate, "weight_decay": weight_decay})
@@ -363,8 +375,18 @@ if __name__ == "__main__":
                                      batch_obj_mask.detach(), batch_depth_mask.detach(),
                                      batch_sampled_z.detach())
             # with performance_measure(f"Backward"):
-                batch_loss.backward()
-                optimiser.step()
+                if AMP:
+                    # Scales the loss, and calls backward()
+                    # to create scaled gradients
+                    scaler.scale(batch_loss).backward()
+                    # Unscales gradients and calls
+                    # or skips optimizer.step()
+                    scaler.step(optimiser)
+                    # Updates the scale for next iteration
+                    scaler.update()
+                else:
+                    batch_loss.backward()
+                    optimiser.step()
                 optimiser.zero_grad(set_to_none=True)
                 # print("loss ", batch_loss.item())
 
@@ -384,10 +406,14 @@ if __name__ == "__main__":
             (live_mode and time.time()-last_frame_time>keep_live_time)) and frame_id >= 10:
             vis3d.clear_geometries()
             for obj_id, obj_k in obj_dict.items():
-                if obj_id == 0 or obj_k.n_keyframes <= 2:   # too few detections
+                # if obj_id == 0:
+                #     continue
+                if obj_k.n_keyframes <= 2:   # too few detections
                     continue
                 bound = obj_k.get_bound(intrinsic_open3d)
+                print("obj ", obj_id)
                 print("bound ", bound)
+                print("kf id dict ", obj_k.kf_id_dict)
                 if bound is None:
                     print("get bound failed obj ", obj_id)
                     continue

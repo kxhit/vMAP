@@ -7,26 +7,37 @@ import vis
 from tqdm import tqdm
 
 class Trainer:
-    def __init__(self):
+    def __init__(self, config, obj_id):
         # todo set param
+        self.obj_id = obj_id
+        self.config = config.copy()
         self.device = "cuda:0"
-        self.hidden_feature_size = 32 #32   # 256 for iMAP, 128 for seperate bg
-        self.obj_scale = 3. # 10 for bg and iMAP
+        do_seperate_bg = False
+        if self.obj_id == 0:
+            self.config["model"]["obj_scale"] = config["model"]["bg_scale"]
+            if do_seperate_bg:
+                self.config["model"]["hidden_feature_size"] = 128
+        self.hidden_feature_size = config["model"]["hidden_feature_size"] #32   # 256 for iMAP, 128 for seperate bg
+        self.obj_scale = config["model"]["obj_scale"] # 10 for bg and iMAP
         self.n_unidir_funcs = 5
         self.emb_size1 = 21*(3+1)+3
         self.emb_size2 = 21*(5+1)+3 - self.emb_size1
-        self.learning_rate = 0.001
-        self.weight_decay = 0.013
 
         self.load_network()
-        self.optimiser = torch.optim.AdamW(
-            self.fc_occ_map.parameters(),
-            lr=self.learning_rate,
-            weight_decay=self.weight_decay)
-        self.optimiser.add_param_group({"params": self.pe.parameters(),
-                                        "lr": self.learning_rate,
-                                        "weight_decay": self.weight_decay})
 
+        # self.learning_rate = 0.001
+        # self.weight_decay = 0.013
+        # self.optimiser = torch.optim.AdamW(
+        #     self.fc_occ_map.parameters(),
+        #     lr=self.learning_rate,
+        #     weight_decay=self.weight_decay)
+        # self.optimiser.add_param_group({"params": self.pe.parameters(),
+        #                                 "lr": self.learning_rate,
+        #                                 "weight_decay": self.weight_decay})
+        if self.obj_id == 0:
+            self.bound_extent = 0.99
+        else:
+            self.bound_extent = 0.9
 
     def load_network(self):
         self.fc_occ_map = model.OccupancyMap(
@@ -40,7 +51,7 @@ class Trainer:
     def meshing(self, bound, obj_center, grid_dim=256):
         occ_range = [-1., 1.]
         range_dist = occ_range[1] - occ_range[0]
-        scene_scale_np = bound.extent / (range_dist * 0.9)
+        scene_scale_np = bound.extent / (range_dist * self.bound_extent)
         scene_scale = torch.from_numpy(scene_scale_np).float().to(self.device)
         transform_np = np.eye(4, dtype=np.float32)
         transform_np[:3, 3] = bound.center

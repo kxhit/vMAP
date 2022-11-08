@@ -105,8 +105,10 @@ class sceneObject:
     TODO fill...
     """
 
-    def __init__(self, device, rgb:torch.tensor, depth:torch.tensor, mask:torch.tensor, bbox_2d:torch.tensor, t_wc:torch.tensor, intrinsic, live_frame_id) -> None:
+    def __init__(self, config, obj_id, device, rgb:torch.tensor, depth:torch.tensor, mask:torch.tensor, bbox_2d:torch.tensor, t_wc:torch.tensor, intrinsic, live_frame_id) -> None:
         # todo move global config params into args
+        self.config = config.copy()
+        self.obj_id = obj_id
         self.device = device
 
         assert rgb.shape[:2] == depth.shape
@@ -118,14 +120,17 @@ class sceneObject:
         self.frames_height = rgb.shape[1]
 
         # TODO: what should these be set as??
-        self.min_bound = 0.0
-        self.max_bound = 10.0
+        self.min_bound = self.config["render"]["depth_range"][0]
+        self.max_bound = self.config["render"]["depth_range"][1]
 
         self.n_keyframes = 1  # Number of keyframes
-        self.keyframe_buffer_size = 10 #20
-        self.keyframe_step = 25 # for bg
-        # todo for live mode
-        # self.keyframe_step = 1
+        self.keyframe_buffer_size = 20 #20 10
+        self.live_mode = bool(self.config["dataset"]["live"])
+        if self.live_mode:
+            self.keyframe_step = 1
+        else:
+            self.keyframe_step = 25 # for bg
+
         self.kf_id_dict = {live_frame_id:0}
         self.kf_buffer_full = False
         self.frame_cnt = 0  # number of frames taken in
@@ -173,7 +178,7 @@ class sceneObject:
         self.t_wc_batch[0] = t_wc
 
         # network map
-        self.trainer = trainer.Trainer()
+        self.trainer = trainer.Trainer(self.config, self.obj_id)
 
         # 3D boundary
         self.bbox3d = None
@@ -250,9 +255,7 @@ class sceneObject:
             self.t_wc_batch[kf_pointer, ...] = t_wc
             self.bbox[kf_pointer, ...] = bbox_2d
 
-
-
-        # print("self.rgbs_batch.device ", self.rgbs_batch.device)
+        # print("self.kf_id_dic ", self.kf_id_dict)
         self.frame_cnt += 1
 
     def prune_keyframe(self):
@@ -290,14 +293,20 @@ class sceneObject:
 
     def get_training_samples(self, n_frames, n_samples, cached_rays_dir):
         # Sample pixels
-        if self.n_keyframes > 2: # make sure latest 2 frames are sampled
+        if self.n_keyframes > 2: # make sure latest 2 frames are sampled    todo if kf pruned, this is not the latest frame
             keyframe_ids = torch.randint(low=0,
                                          high=self.n_keyframes,
-                                         size=(n_frames-2,),
+                                         size=(n_frames - 2,),
                                          dtype=torch.long,
                                          device=self.device)
+            # if self.kf_buffer_full:
+            latest_frame_ids = list(self.kf_id_dict.values())[-2:]
             keyframe_ids = torch.cat([keyframe_ids,
-                                      torch.tensor([self.n_keyframes-2, self.n_keyframes-1], device=keyframe_ids.device)])
+                                          torch.tensor(latest_frame_ids, device=keyframe_ids.device)])
+            print("latest_frame_ids", latest_frame_ids)
+            # else:   # sample last 2 frames
+            #     keyframe_ids = torch.cat([keyframe_ids,
+            #                               torch.tensor([self.n_keyframes-2, self.n_keyframes-1], device=keyframe_ids.device)])
         else:
             keyframe_ids = torch.randint(low=0,
                                          high=self.n_keyframes,
@@ -378,7 +387,7 @@ class sceneObject:
         if valid_depth_count:
             # Sample between min bound and depth for all pixels with valid depth
             sampled_z[valid_depth_mask, :n_bins_cam2surface] = stratified_bins(
-                self.min_bound, sampled_depth.view(-1)[valid_depth_mask],
+                self.min_bound, sampled_depth.view(-1)[valid_depth_mask]-eps,
                 n_bins_cam2surface, valid_depth_count, device=self.device)
 
             # sampling around depth for this object

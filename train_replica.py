@@ -138,7 +138,7 @@ if __name__ == "__main__":
                     # with performance_measure(f"single append"):
                     scene_obj.append_keyframe(rgb, depth, state, bbox, twc, frame_id)
                 else: # init scene_obj
-                    scene_obj = sceneObject(data_device, rgb, depth, state, bbox, twc, intrinsic_open3d, 0)
+                    scene_obj = sceneObject(config, obj_id, data_device, rgb, depth, state, bbox, twc, intrinsic_open3d, 0)
                     obj_dict.update({obj_id: scene_obj})
                     # params = [scene_obj.trainer.fc_occ_map.parameters(), scene_obj.trainer.pe.parameters()]
                     optimiser.add_param_group({"params": scene_obj.trainer.fc_occ_map.parameters(), "lr": learning_rate, "weight_decay": weight_decay})

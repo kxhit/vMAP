@@ -24,7 +24,7 @@ from detic.modeling.utils import reset_cls_test
 # from mmdet.apis import inference_detector, init_detector
 import open3d
 import imgviz
-from utils import track_instance, get_bbox2d
+from utils import track_instance, get_bbox2d, check_mask_order
 
 
 class Tracking:
@@ -133,12 +133,12 @@ class Tracking:
         if do_thread:
             print("do thread")
             rospy.init_node("imap", anonymous=True)
-            # self.sub_topic = "latest_frame"
-            self.sub_topic = "latest_keyframe"
+            self.sub_topic = "latest_frame"
+            # self.sub_topic = "latest_keyframe"
             rospy.Subscriber(self.sub_topic, Frame, self.one_kf_callback) # latest keyframe
             # rospy.Subscriber(sub_topic, Frame, self.one_kf_callback) # latest frame for vis
             rospy.Subscriber("/keyframe_poses", PoseWithIDArray, self.kf_callback) # only randomly choose one kf from the list
-            print("subscribing ros topic")
+            print("subscribing ros topic ", self.sub_topic)
             rospy.spin()
 
             self.map_que.put("finish")
@@ -160,10 +160,16 @@ class Tracking:
         #     return
         ros_time = time.time()
         kf_id = msg.id
-        if kf_id == self.prev_kf_id:
-            return
-        else:
-            self.prev_kf_id = kf_id
+        if self.sub_topic == "latest_frame":
+            if self.prev_kf_id is None:
+                self.prev_kf_id = 0
+            kf_id = self.prev_kf_id + 1
+            self.prev_kf_id += 1
+        else:   # still the same kf, skip
+            if kf_id == self.prev_kf_id:
+                return
+            else:
+                self.prev_kf_id = kf_id
         rgb_np = self.cv_bridge.imgmsg_to_cv2(msg.rgb, "rgb8")   # rgb8
         depth_np = self.cv_bridge.imgmsg_to_cv2(msg.depth, "passthrough")
         depth_np = np.nan_to_num(depth_np, nan=0.0)
@@ -214,27 +220,46 @@ class Tracking:
                 results = self.detector.detect(frame)["instances"].to("cpu")
             classes = results.pred_classes.tolist()
             masks = list(np.asarray(results.pred_masks))
+            # masks = results.pred_masks.tolist()
             print("detect time ", time.time() - detect_time)
 
             depth_np[(depth_np > self.max_depth) | (depth_np < self.min_depth)] = 0
 
             track_instance_time = time.time()
             T_CW = np.linalg.inv(camera_transform[0])
-            inst_data = track_instance(masks, classes, depth_np[0], self.inst_list, self.sem_dict, self.intrinsic_open3d,
+            # inst_data = track_instance(masks, classes, depth_np[0], self.inst_list, self.sem_dict, self.intrinsic_open3d,
+            #                            T_CW, voxel_size=0.01, min_pixels=self.min_pixels, erode=False,
+            #                            clip_features=self.clip_features,
+            #                            class_names=self.class_names)
+            inst_data_list, inst_ids = track_instance(masks, classes, depth_np[0], self.inst_list, self.sem_dict,
+                                       self.intrinsic_open3d,
                                        T_CW, voxel_size=0.01, min_pixels=self.min_pixels, erode=False,
                                        clip_features=self.clip_features,
                                        class_names=self.class_names)
+            # inst_data = check_mask_order(inst_list, depth_np[0], inst_ids)
+            assert len(inst_ids) == len(set(inst_ids))
             print("track instance time ", time.time()-track_instance_time)
-            # print("self.sem_dict ", self.sem_dict)
-            for obj_id in np.unique(inst_data):
-                mask = inst_data == obj_id
-                bbox2d = get_bbox2d(mask, bbox_scale=self.bbox_scale)
+            for i, obj_id in enumerate(set(inst_ids)):
+                mask = inst_data_list[i]
+                bbox2d = get_bbox2d(mask.numpy(), bbox_scale=self.bbox_scale)
                 if bbox2d is None:
-                    inst_data[mask] = 0  # set to bg
+                    inst_data_list.remove(mask)
+                    inst_ids.remove(obj_id)# delete
                     continue
                 # bbox_dict.update({int(obj_id): torch.from_numpy(np.array(bbox2d).reshape(1, -1))})  # batch format
                 bbox_dict.update({int(obj_id): torch.from_numpy(np.array([bbox2d[0], bbox2d[2], bbox2d[1], bbox2d[3]]))})   # bbox order
-            obj_np[0] = inst_data
+
+            # print("self.sem_dict ", self.sem_dict)
+            # inst_data = frame.copy()    # todo debug
+            # for obj_id in np.unique(inst_data):
+            #     mask = inst_data == obj_id
+            #     bbox2d = get_bbox2d(mask, bbox_scale=self.bbox_scale)
+            #     if bbox2d is None:
+            #         inst_data[mask] = 0  # set to bg
+            #         continue
+            #     # bbox_dict.update({int(obj_id): torch.from_numpy(np.array(bbox2d).reshape(1, -1))})  # batch format
+            #     bbox_dict.update({int(obj_id): torch.from_numpy(np.array([bbox2d[0], bbox2d[2], bbox2d[1], bbox2d[3]]))})   # bbox order
+            # obj_np[0] = inst_data
 
             # viz detection
             # frame = mmcv.bgr2rgb(frame)
@@ -249,14 +274,15 @@ class Tracking:
                 color_mask = color[i]
                 frame[mask] = frame[mask] * (1 - alpha) + color_mask * alpha
             cv2.imshow("detection", frame)
-            cv2.imshow("merged", imgviz.label2rgb(inst_data, colormap=self.inst_color_map))
+            # cv2.imshow("merged", imgviz.label2rgb(inst_data, colormap=self.inst_color_map))
             cv2.waitKey(1)
 
         # send data to mapping -------------------------------------------
         rgb = torch.from_numpy(rgb_np[0]).permute(1,0,2)
         depth = torch.from_numpy(depth_np[0]).permute(1,0)
         twc = torch.from_numpy(camera_transform[0])
-        inst = torch.from_numpy(obj_np[0]).permute(1,0)
+        # inst = torch.from_numpy(obj_np[0]).permute(1,0)
+        inst = (inst_data_list, inst_ids)
         try:
             self.map_que.put((rgb, depth, twc, inst, bbox_dict.copy(), kf_id), block=False)
             print("`````````````````````````````````````````")

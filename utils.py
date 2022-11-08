@@ -4,7 +4,7 @@ import torch
 from functorch import combine_state_for_ensemble
 import open3d
 import queue
-
+import copy
 
 def update_vmap(models, optimiser):
     fmodel, params, buffers = combine_state_for_ensemble(models)
@@ -104,9 +104,12 @@ def check_inside_ratio(pc, bbox3D):
 
 def track_instance(masks, classes, depth, inst_list, sem_dict, intrinsic_open3d, T_CW, IoU_thresh=0.5, voxel_size=0.1,
                    min_pixels=2000, erode=True, clip_features=None, class_names=None):
-    inst_data = np.zeros_like(depth, dtype=np.int)
-    bbox3d_scale = 1.05  # todo 1.0
+    # inst_data = np.zeros_like(depth, dtype=np.int)
+    inst_data_list = []
+    inst_ids = []
+    bbox3d_scale = 1.0  # todo 1.0
     for i in range(len(masks)):
+        inst_data = np.zeros_like(depth, dtype=np.int)
         smaller_mask = cv2.erode(masks[i].astype(np.uint8), np.ones((5, 5)), iterations=3).astype(bool)
         inst_depth_small = depth.copy()
         inst_depth_small[~smaller_mask] = 0
@@ -128,7 +131,7 @@ def track_instance(masks, classes, depth, inst_list, sem_dict, intrinsic_open3d,
         inst_pc = unproject_pointcloud(inst_depth, intrinsic_open3d, T_CW)
         sem_inst_list = []
         if clip_features is not None: # check similar sems based on clip feature distance
-            sem_thr = 260.
+            sem_thr = 320.  # 260.
             for sem_exist in sem_dict.keys():
                 if torch.abs(clip_features[class_names[inst_class]] - clip_features[class_names[sem_exist]]).sum() < sem_thr:
                     sem_inst_list.extend(sem_dict[sem_exist])
@@ -189,5 +192,52 @@ def track_instance(masks, classes, depth, inst_list, sem_dict, intrinsic_open3d,
         inst_data[inst_mask] = inst_id
         if diff_mask is not None:
             inst_data[diff_mask] = -1   # unsure area
+        if inst_id not in inst_ids:
+            inst_data_list.append(torch.from_numpy(inst_data))
+            inst_ids.append(inst_id)
+        else:
+            continue
+            # idx = inst_ids.index(inst_id)
+            # inst_data_list[idx] = inst_data_list[idx] & torch.from_numpy(inst_data) # merge them? todo
+    # return inst_data
+    return inst_data_list, inst_ids
 
-    return inst_data
+
+def check_mask_order(obj_masks, depth_np, obj_ids):
+    print(len(obj_masks))
+    print(len(obj_ids))
+
+    assert len(obj_masks) == len(obj_ids)
+    depth = torch.from_numpy(depth_np)
+    obj_masked_modified = copy.deepcopy(obj_masks[:])
+    for i in range(len(obj_masks) - 1):
+
+        mask1 = obj_masks[i].float()
+        mask1_ = obj_masked_modified[i].float()
+        for j in range(i + 1, len(obj_masks)):
+            mask2 = obj_masks[j].float()
+            mask2_ = obj_masked_modified[j].float()
+            # case 1: if they don't intersect we don't touch them
+            if ((mask1 + mask2) == 2).sum() == 0:
+                continue
+            # case 2: the entire object 1 is inside of object 2, we say object 1 is in front of object 2:
+            elif (((mask1 + mask2) == 2).float() - mask1).sum() == 0:
+                mask2_ -= mask1_
+            # case 3: the entire object 2 is inside of object 1, we say object 2 is in front of object 1:
+            elif (((mask1 + mask2) == 2).float() - mask2).sum() == 0:
+                mask1_ -= mask2_
+            # case 4: use depth to check object order:
+            else:
+                # object 1 is closer
+                if (depth * mask1).sum() / mask1.sum() > (depth * mask2).sum() / mask2.sum():
+                    mask2_ -= ((mask1 + mask2) == 2).float()
+                # object 2 is closer
+                if (depth * mask1).sum() / mask1.sum() < (depth * mask2).sum() / mask2.sum():
+                    mask1_ -= ((mask1 + mask2) == 2).float()
+
+    final_mask = torch.zeros_like(depth, dtype=torch.int)
+    # instance_labels = {}
+    for i in range(len(obj_masked_modified)):
+        final_mask = final_mask.masked_fill(obj_masked_modified[i] > 0, obj_ids[i])
+        # instance_labels[i] = obj_ids[i].item()
+    return final_mask.cpu().numpy()
