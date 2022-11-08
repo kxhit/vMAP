@@ -24,7 +24,7 @@ if __name__ == "__main__":
     # torch.backends.cudnn.allow_tf32 = True
     # init todo arg parser class
     # hyper param for trainer
-    log_dir = "logs/room0_vmap_iter1"
+    log_dir = "logs/room0_vmap_kf10"
     training_device = "cuda:0"
     # data_device = "cpu"
     data_device ="cuda:0"
@@ -133,7 +133,7 @@ if __name__ == "__main__":
                     scene_obj = obj_dict[obj_id]
                     is_kf = True    # todo change condition according to kf_every
                     # with performance_measure(f"single append"):
-                    scene_obj.append_keyframe(rgb, depth, state, bbox, twc)
+                    scene_obj.append_keyframe(rgb, depth, state, bbox, twc, frame_id)
                 else: # init scene_obj
                     scene_obj = sceneObject(data_device, rgb, depth, state, bbox, twc, intrinsic_open3d, 0)
                     obj_dict.update({obj_id: scene_obj})

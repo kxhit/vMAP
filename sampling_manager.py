@@ -1,3 +1,5 @@
+import random
+
 import numpy as np
 import torch
 from pdb import set_trace
@@ -120,7 +122,7 @@ class sceneObject:
         self.max_bound = 10.0
 
         self.n_keyframes = 1  # Number of keyframes
-        self.keyframe_buffer_size = 20
+        self.keyframe_buffer_size = 10 #20
         self.keyframe_step = 25 # for bg
         # todo for live mode
         # self.keyframe_step = 1
@@ -202,7 +204,7 @@ class sceneObject:
         assert rgb.shape[:2] == mask.shape
         assert bbox_2d.shape == (4,)
         assert t_wc.shape == (4, 4,)
-        assert self.n_keyframes < self.keyframe_buffer_size - 1
+        assert self.n_keyframes <= self.keyframe_buffer_size - 1
         assert rgb.dtype == torch.uint8
         assert mask.dtype == torch.uint8
         assert depth.dtype == torch.float32
@@ -223,23 +225,41 @@ class sceneObject:
             self.kf_id_dict.update({frame_id: self.n_keyframes-1})
 
         else:   # is kf, add new kf
-            self.rgbs_batch[self.n_keyframes, :, :, self.rgb_idx] = rgb
-            self.rgbs_batch[self.n_keyframes, :, :, self.state_idx] = mask[..., None]
-            self.depth_batch[self.n_keyframes, ...] = depth
-            self.t_wc_batch[self.n_keyframes, ...] = t_wc
-            self.bbox[self.n_keyframes, ...] = bbox_2d
-            if self.kf_buffer_full:
-                self.kf_id_dict.popitem()  # remove last
-            self.kf_id_dict.update({frame_id: self.n_keyframes})
+            # self.rgbs_batch[self.n_keyframes, :, :, self.rgb_idx] = rgb
+            # self.rgbs_batch[self.n_keyframes, :, :, self.state_idx] = mask[..., None]
+            # self.depth_batch[self.n_keyframes, ...] = depth
+            # self.t_wc_batch[self.n_keyframes, ...] = t_wc
+            # self.bbox[self.n_keyframes, ...] = bbox_2d
+            # if self.kf_buffer_full:
+            #     self.kf_id_dict.popitem()  # remove last
+            # self.kf_id_dict.update({frame_id: self.n_keyframes})
 
-            self.n_keyframes +=1
+            if self.n_keyframes == self.keyframe_buffer_size - 1:  # kf buffer full, need to prune
+                self.kf_buffer_full = True
+                pruned_frame_id, pruned_kf_id = self.prune_keyframe()
+                self.kf_id_dict.pop(pruned_frame_id)  # remove the pruned kf, pruned_kf_id
+                self.kf_id_dict.update({pruned_frame_id: pruned_kf_id})
+                kf_pointer = pruned_kf_id
+            else:   # not full
+                kf_pointer = self.n_keyframes
+                self.kf_id_dict.update({frame_id: self.n_keyframes})
+                self.n_keyframes +=1
+            self.rgbs_batch[kf_pointer, :, :, self.rgb_idx] = rgb
+            self.rgbs_batch[kf_pointer, :, :, self.state_idx] = mask[..., None]
+            self.depth_batch[kf_pointer, ...] = depth
+            self.t_wc_batch[kf_pointer, ...] = t_wc
+            self.bbox[kf_pointer, ...] = bbox_2d
 
-        if self.n_keyframes == self.keyframe_buffer_size - 1:
-            self.n_keyframes -= 1
-            self.kf_buffer_full = True
+
 
         # print("self.rgbs_batch.device ", self.rgbs_batch.device)
         self.frame_cnt += 1
+
+    def prune_keyframe(self):
+        # simple strategy to prune, randomly choose
+        # pruned_kf_id = torch.randint(0, self.n_keyframes, [1])
+        key, value = random.choice(list(self.kf_id_dict.items()))
+        return key, value
 
     def get_bound(self, intrinsic_open3d):
         # get 3D boundary from posed depth img
@@ -270,11 +290,20 @@ class sceneObject:
 
     def get_training_samples(self, n_frames, n_samples, cached_rays_dir):
         # Sample pixels
-        keyframe_ids = torch.randint(low=0,
-                                     high=self.n_keyframes,
-                                     size=(n_frames,),
-                                     dtype=torch.long,
-                                     device=self.device)    # todo make sure latest 2 frames are sampled
+        if self.n_keyframes > 2: # make sure latest 2 frames are sampled
+            keyframe_ids = torch.randint(low=0,
+                                         high=self.n_keyframes,
+                                         size=(n_frames-2,),
+                                         dtype=torch.long,
+                                         device=self.device)
+            keyframe_ids = torch.cat([keyframe_ids,
+                                      torch.tensor([self.n_keyframes-2, self.n_keyframes-1], device=keyframe_ids.device)])
+        else:
+            keyframe_ids = torch.randint(low=0,
+                                         high=self.n_keyframes,
+                                         size=(n_frames,),
+                                         dtype=torch.long,
+                                         device=self.device)
         keyframe_ids = torch.unsqueeze(keyframe_ids, dim=-1)
 
         idx_w = torch.rand(n_frames, n_samples, device=self.device)
