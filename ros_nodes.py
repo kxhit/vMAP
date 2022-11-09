@@ -26,9 +26,12 @@ import open3d
 import imgviz
 from utils import track_instance, get_bbox2d, check_mask_order
 
+from sampling_manager import performance_measure
+from pdb import set_trace
+import json
 
 class Tracking:
-    def __init__(self, config, track_to_map_que, track_to_vis_que, kfs_que=None, imap_mode=False, do_thread=False, device="cuda:1",
+    def __init__(self, config, track_to_map_que, track_to_vis_que, kfs_que=None, imap_mode=False, do_thread=False, device="cuda:0",
                  config_detector="../../detector/configs/mask2former/mask2former_r50_lsj_8x2_50e_coco-panoptic.py",
                  checkpoint="../../detector/checkpoints/mask2former_r50_lsj_8x2_50e_coco-panoptic_20220326_224516-11a44721.pth",
                  ) -> None:
@@ -139,13 +142,13 @@ class Tracking:
             # rospy.Subscriber(sub_topic, Frame, self.one_kf_callback) # latest frame for vis
             rospy.Subscriber("/keyframe_poses", PoseWithIDArray, self.kf_callback) # only randomly choose one kf from the list
             print("subscribing ros topic ", self.sub_topic)
-            rospy.spin()
+            # rospy.spin()
 
             self.map_que.put("finish")
             print("Tracking process finished")
         else:   # read saved rosbag
             import rosbag
-            bag_file = "/home/xin/kinect_keyframes.bag"    # todo
+            bag_file = "/mnt/datasets/xin_rosbag/keyframes.bag"    # todo
             print("read from rosbag ", bag_file)
             bag = rosbag.Bag(bag_file)
             self.kfs = []
@@ -158,154 +161,158 @@ class Tracking:
     def one_kf_callback(self, msg):
         # if self.map_que.full() and self.vis_que.full():
         #     return
-        ros_time = time.time()
-        kf_id = msg.id
-        if kf_id == self.prev_kf_id:
-            return
-        else:
-            self.prev_kf_id = kf_id
-        rgb_np = self.cv_bridge.imgmsg_to_cv2(msg.rgb, "rgb8")   # rgb8
-        depth_np = self.cv_bridge.imgmsg_to_cv2(msg.depth, "passthrough")
-        depth_np = np.nan_to_num(depth_np, nan=0.0)
 
-        # Formatting the estimated camera pose as a euclidean transformation matrix w.r.t world frame
-        quat = msg.pose.orientation
-        rot = Rotation.from_quat([quat.x, quat.y, quat.z, quat.w]).as_matrix()
+        print("`````````````````````````````````````````")
+        with performance_measure(f"Total callback time"):
 
-        pose = msg.pose.position    # T_wc is from latest_kf, T_cw is latest frame
-        trans = np.asarray([[pose.x], [pose.y], [pose.z]])
+            kf_id = msg.id
+            if kf_id == self.prev_kf_id:
+                return
+            else:
+                self.prev_kf_id = kf_id
 
-        camera_transform = np.concatenate((rot, trans), axis=1)
-        camera_transform = np.vstack((camera_transform, [0.0, 0.0, 0.0, 1.0]))
-        if self.sub_topic == "latest_frame":
-            camera_transform = np.linalg.inv(camera_transform)    # no inv for kfs
-        camera_transform = camera_transform[None, ...]
+            rgb_np = self.cv_bridge.imgmsg_to_cv2(msg.rgb, "rgb8")   # rgb8
+            depth_np = self.cv_bridge.imgmsg_to_cv2(msg.depth, "passthrough")
+            depth_np = np.nan_to_num(depth_np, nan=0.0)
 
-        # Crop images to remove the black edges after calibration
-        w = rgb_np.shape[1]
-        h = rgb_np.shape[0]
+            # Formatting the estimated camera pose as a euclidean transformation matrix w.r.t world frame
+            quat = msg.pose.orientation
+            rot = Rotation.from_quat([quat.x, quat.y, quat.z, quat.w]).as_matrix()
 
-        # undistort
-        if self.map1x is not None:
-            # depth_np = cv2.remap(depth_np, self.map1x, self.map1y, cv2.INTER_NEAREST) # todo only undistort rgb
-            rgb_np = cv2.remap(rgb_np, self.map1x, self.map1y, cv2.INTER_LINEAR)
+            pose = msg.pose.position    # T_wc is from latest_kf, T_cw is latest frame
+            trans = np.asarray([[pose.x], [pose.y], [pose.z]])
 
-        rgb_np = rgb_np[self.mh: (h - self.mh), self.mw: (w - self.mw)]
-        rgb_np = rgb_np[None, ...]
+            camera_transform = np.concatenate((rot, trans), axis=1)
+            camera_transform = np.vstack((camera_transform, [0.0, 0.0, 0.0, 1.0]))
+            if self.sub_topic == "latest_frame":
+                camera_transform = np.linalg.inv(camera_transform)    # no inv for kfs
+            camera_transform = camera_transform[None, ...]
 
-        depth_np = depth_np[self.mh: (h - self.mh), self.mw: (w - self.mw)]
-        depth_np = depth_np[None, ...].astype(np.float32)
+            # Crop images to remove the black edges after calibration
+            w = rgb_np.shape[1]
+            h = rgb_np.shape[0]
 
-        if self.imap_mode:
-            obj_np = np.zeros_like(depth_np, dtype=np.int)
-            bbox_dict = {0: torch.from_numpy(np.array([int(0), int(0), depth_np.shape[1], depth_np.shape[0]]).reshape(1, -1))}
-            depth_np[(depth_np > self.max_depth) | (depth_np < self.min_depth)] = 0
-        else:
-            # init label to background 0
-            obj_np = np.zeros(depth_np.shape, dtype=np.int)
-            bbox_dict = {}
+            # undistort
+            if self.map1x is not None:
+                # depth_np = cv2.remap(depth_np, self.map1x, self.map1y, cv2.INTER_NEAREST) # todo only undistort rgb
+                rgb_np = cv2.remap(rgb_np, self.map1x, self.map1y, cv2.INTER_LINEAR)
 
-            frame = rgb_np[0]
-            detect_time = time.time()
+            rgb_np = rgb_np[self.mh: (h - self.mh), self.mw: (w - self.mw)]
+            rgb_np = rgb_np[None, ...]
 
-            # detector
-            # print("input shape ", input_frame.shape)
-            with torch.cuda.amp.autocast():
-                results = self.detector.detect(frame)["instances"].to("cpu")
-            classes = results.pred_classes.tolist()
-            masks = list(np.asarray(results.pred_masks))
-            # masks = results.pred_masks.tolist()
-            print("detect time ", time.time() - detect_time)
-            # overlap_mask = torch.from_numpy(np.asarray(results.pred_masks)).sum(dim=0)
-            # vis_overlap = imgviz.label2rgb(overlap_mask.numpy())
-            # cv2.imshow("overlap", vis_overlap)
-            # cv2.waitKey(1)
+            depth_np = depth_np[self.mh: (h - self.mh), self.mw: (w - self.mw)]
+            depth_np = depth_np[None, ...].astype(np.float32)
             depth_np[(depth_np > self.max_depth) | (depth_np < self.min_depth)] = 0
 
-            track_instance_time = time.time()
-            T_CW = np.linalg.inv(camera_transform[0])
-            # inst_data = track_instance(masks, classes, depth_np[0], self.inst_list, self.sem_dict, self.intrinsic_open3d,
-            #                            T_CW, voxel_size=0.01, min_pixels=self.min_pixels, erode=False,
-            #                            clip_features=self.clip_features,
-            #                            class_names=self.class_names)
-            inst_data_dict = track_instance(masks, classes, depth_np[0], self.inst_list, self.sem_dict,
-                                       self.intrinsic_open3d,
-                                       T_CW, voxel_size=0.01, min_pixels=self.min_pixels, erode=False,
-                                       clip_features=self.clip_features,
-                                       class_names=self.class_names)
-            print("track instance time ", time.time()-track_instance_time)
-            for obj_id, mask in (inst_data_dict.items()):
-                bbox2d = get_bbox2d(mask.numpy(), bbox_scale=self.bbox_scale)
-                if bbox2d is None:
-                    inst_data_dict.remove(obj_id)   # delete
-                    continue
-                # bbox_dict.update({int(obj_id): torch.from_numpy(np.array(bbox2d).reshape(1, -1))})  # batch format
-                bbox_dict.update({int(obj_id): torch.from_numpy(np.array([bbox2d[0], bbox2d[2], bbox2d[1], bbox2d[3]]))})   # bbox order
+            if self.imap_mode:
+                obj_np = np.zeros_like(depth_np, dtype=int)
+                bbox_dict = {0: torch.from_numpy(np.array([int(0), int(0), depth_np.shape[1], depth_np.shape[0]]).reshape(1, -1))}
+            else:
+                T_CW = np.linalg.inv(camera_transform[0])
 
-            # print("self.sem_dict ", self.sem_dict)
-            # inst_data = frame.copy()    # todo debug
-            # for obj_id in np.unique(inst_data):
-            #     mask = inst_data == obj_id
-            #     bbox2d = get_bbox2d(mask, bbox_scale=self.bbox_scale)
-            #     if bbox2d is None:
-            #         inst_data[mask] = 0  # set to bg
-            #         continue
-            #     # bbox_dict.update({int(obj_id): torch.from_numpy(np.array(bbox2d).reshape(1, -1))})  # batch format
-            #     bbox_dict.update({int(obj_id): torch.from_numpy(np.array([bbox2d[0], bbox2d[2], bbox2d[1], bbox2d[3]]))})   # bbox order
-            # obj_np[0] = inst_data
+                # init label to background 0
+                obj_np = np.zeros(depth_np.shape, dtype=int)
+                bbox_dict = {}
 
-            # viz detection
-            # frame = mmcv.bgr2rgb(frame)
-            # frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            # alpha = 0.6
-            # color = None
-            # if color is None:
-            #     random_colors = np.random.randint(0, 255, (len(masks), 3))
-            #     color = [tuple(c) for c in random_colors]
-            #     color = np.array(color, dtype=np.uint8)
-            # for i, mask in enumerate(masks):
-            #     color_mask = color[i]
-            #     frame[mask] = frame[mask] * (1 - alpha) + color_mask * alpha
-            # cv2.imshow("detection", frame)
-            # # cv2.imshow("merged", imgviz.label2rgb(inst_data, colormap=self.inst_color_map))
-            # cv2.waitKey(1)
+                frame = rgb_np[0]
+                
+                # Run detector
+                with performance_measure(f"Detection"):
+                    with torch.cuda.amp.autocast():
+                        results = self.detector.detect(frame)["instances"].to("cpu")
+                    classes = results.pred_classes.tolist()
+                    masks = list(np.asarray(results.pred_masks))
 
-            overlap_mask = torch.stack(list(inst_data_dict.values())).sum(dim=0)
-            vis_overlap = imgviz.label2rgb(overlap_mask.numpy())
-            cv2.imshow("overlap merged", vis_overlap)
-            cv2.waitKey(1)
-        # send data to mapping -------------------------------------------
-        rgb = torch.from_numpy(rgb_np[0]).permute(1,0,2)
-        depth = torch.from_numpy(depth_np[0]).permute(1,0)
-        twc = torch.from_numpy(camera_transform[0])
-        # inst = torch.from_numpy(obj_np[0]).permute(1,0)
-        if self.imap_mode:
-            inst = torch.from_numpy(obj_np)
-        else:
-            inst = inst_data_dict.copy()
-        try:
-            self.map_que.put((rgb, depth, twc, inst, bbox_dict.copy(), kf_id), block=False)
-            print("`````````````````````````````````````````")
-            print("ros kf id ", kf_id)
-        except queue.Full:
-            print("ros thread queue FULL")
-            pass
+                # masks = results.pred_masks.tolist()
 
-        # # send pose to vis -----------------------------------------------
-        # try:
-        #     if self.use_detector:
-        #         self.vis_que.put((camera_transform.copy(), depth_np.copy(), rgb_np.copy(), obj_np.copy()), block=False)
-        #     else:
-        #         self.vis_que.put((camera_transform.copy(), depth_np.copy(), rgb_np.copy()), block=False)
-        # except queue.Full:
-        #     pass
+                # overlap_mask = torch.from_numpy(np.asarray(results.pred_masks)).sum(dim=0)
+                # vis_overlap = imgviz.label2rgb(overlap_mask.numpy())
+                # cv2.imshow("overlap", vis_overlap)
+                # cv2.waitKey(1)
 
-        del rgb_np
-        del depth_np
-        del camera_transform
-        del obj_np
+                # inst_data = track_instance(masks, classes, depth_np[0], self.inst_list, self.sem_dict, self.intrinsic_open3d,
+                #                            T_CW, voxel_size=0.01, min_pixels=self.min_pixels, erode=False,
+                #                            clip_features=self.clip_features,
+                #                            class_names=self.class_names)
+                with performance_measure(f"Track instance"):
+                    inst_data_dict = track_instance(masks, classes, depth_np[0], self.inst_list, self.sem_dict,
+                                            self.intrinsic_open3d,
+                                            T_CW, voxel_size=0.01, min_pixels=self.min_pixels, erode=False,
+                                            clip_features=self.clip_features,
+                                            class_names=self.class_names)
 
-        print("ros time ", time.time()-ros_time)
+                for obj_id, mask in (inst_data_dict.items()):
+                    bbox2d = get_bbox2d(mask.numpy(), bbox_scale=self.bbox_scale)
+                    if bbox2d is None:
+                        inst_data_dict.remove(obj_id)   # delete
+                        continue
+                    # bbox_dict.update({int(obj_id): torch.from_numpy(np.array(bbox2d).reshape(1, -1))})  # batch format
+                    bbox_dict.update({int(obj_id): torch.from_numpy(np.array([bbox2d[0], bbox2d[2], bbox2d[1], bbox2d[3]]))})   # bbox order
+
+                # print("self.sem_dict ", self.sem_dict)
+                # inst_data = frame.copy()    # todo debug
+                # for obj_id in np.unique(inst_data):
+                #     mask = inst_data == obj_id
+                #     bbox2d = get_bbox2d(mask, bbox_scale=self.bbox_scale)
+                #     if bbox2d is None:
+                #         inst_data[mask] = 0  # set to bg
+                #         continue
+                #     # bbox_dict.update({int(obj_id): torch.from_numpy(np.array(bbox2d).reshape(1, -1))})  # batch format
+                #     bbox_dict.update({int(obj_id): torch.from_numpy(np.array([bbox2d[0], bbox2d[2], bbox2d[1], bbox2d[3]]))})   # bbox order
+                # obj_np[0] = inst_data
+
+                # viz detection
+                # frame = mmcv.bgr2rgb(frame)
+                # frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                # alpha = 0.6
+                # color = None
+                # if color is None:
+                #     random_colors = np.random.randint(0, 255, (len(masks), 3))
+                #     color = [tuple(c) for c in random_colors]
+                #     color = np.array(color, dtype=np.uint8)
+                # for i, mask in enumerate(masks):
+                #     color_mask = color[i]
+                #     frame[mask] = frame[mask] * (1 - alpha) + color_mask * alpha
+                # cv2.imshow("detection", frame)
+                # # cv2.imshow("merged", imgviz.label2rgb(inst_data, colormap=self.inst_color_map))
+                # cv2.waitKey(1)
+
+                overlap_mask = torch.stack(list(inst_data_dict.values())).sum(dim=0)
+                vis_overlap = imgviz.label2rgb(overlap_mask.numpy(), colormap=self.inst_color_map)
+
+                cv2.imshow("overlap merged", vis_overlap)
+                cv2.waitKey(1)
+            # send data to mapping -------------------------------------------
+            with performance_measure(f"pushing to mapping thread"):
+                rgb = torch.from_numpy(rgb_np[0]).permute(1,0,2)
+                depth = torch.from_numpy(depth_np[0]).permute(1,0)
+                twc = torch.from_numpy(camera_transform[0])
+                # inst = torch.from_numpy(obj_np[0]).permute(1,0)
+                if self.imap_mode:
+                    inst = torch.from_numpy(obj_np)
+                else:
+                    inst = inst_data_dict.copy()
+                try:
+                    self.map_que.put((rgb, depth, twc, inst, bbox_dict.copy(), kf_id), block=False)
+                    print("ros kf id ", kf_id)
+                except queue.Full:
+                    print("ros thread queue FULL")
+                    # pass
+
+            # # send pose to vis -----------------------------------------------
+            # try:
+            #     if self.use_detector:
+            #         self.vis_que.put((camera_transform.copy(), depth_np.copy(), rgb_np.copy(), obj_np.copy()), block=False)
+            #     else:
+            #         self.vis_que.put((camera_transform.copy(), depth_np.copy(), rgb_np.copy()), block=False)
+            # except queue.Full:
+            #     pass
+
+            del rgb_np
+            del depth_np
+            del camera_transform
+            del obj_np
+
 
     def kf_callback(self, msg):
         kf_update_dict = {}
@@ -337,5 +344,23 @@ class Tracking:
         except queue.Full:
             pass
 
+if __name__ == "__main__":
+    print("running tracking")
 
+    with open("configs/live/config_azure_ros.json") as json_file:
+        config = json.load(json_file)
+
+    track_to_map_Buffer = torch.multiprocessing.Queue(maxsize=5)
+    kfs_que = torch.multiprocessing.Queue(maxsize=5)
+
+    try:
+        Tracking(config, track_to_map_Buffer, None, kfs_que, False, True)
+        
+        print("spinning...")
+        rospy.spin()
+        # import time
+        # # while
+        # time.sleep(10)
+    except rospy.ROSInterruptException:
+        print("got exception")
 

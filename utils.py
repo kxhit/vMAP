@@ -6,6 +6,10 @@ from functorch import combine_state_for_ensemble
 import open3d
 import queue
 import copy
+import torch.utils.dlpack
+
+from sampling_manager import performance_measure
+from pdb import set_trace
 
 def update_vmap(models, optimiser):
     fmodel, params, buffers = combine_state_for_ensemble(models)
@@ -86,53 +90,76 @@ class InstData:
         self.merge_cnt = 0  # merge times counting
         self.cmp_cnt = 0
 
-def unproject_pointcloud(depth, intrinsic_open3d, T_CW):
+def back_project_depth_map(depth, intrinsic_open3d, T_CW, device):
     # depth, mask, intrinsic, extrinsic -> point clouds
-    pc_sample = open3d.geometry.PointCloud.create_from_depth_image(depth=open3d.geometry.Image(depth),
-                                                                   intrinsic=intrinsic_open3d,
-                                                                   extrinsic=T_CW,
-                                                                   depth_scale=1.0,
-                                                                   project_valid_depth_only=True)
+    depth_o3dt = open3d.t.geometry.Image(open3d.core.Tensor(depth, device=open3d.core.Device(device)))
+    pc_sample = open3d.t.geometry.PointCloud.create_from_depth_image(depth=depth_o3dt, intrinsics=intrinsic_open3d, extrinsics=T_CW, depth_scale=1.0)
+
+    # pc_sample = open3d.geometry.PointCloud.create_from_depth_image(depth=open3d.geometry.Image(depth),
+    #                                                                intrinsic=intrinsic_open3d,
+    #                                                                extrinsic=T_CW,
+    #                                                                depth_scale=1.0,
+    #                                                        project_valid_depth_only=True)
+    # assert pc_sample.point.positions.shape[0] > 0
     return pc_sample
 
 def check_inside_ratio(pc, bbox3D):
     #  pc, bbox3d -> inside ratio
-    indices = bbox3D.get_point_indices_within_bounding_box(pc.points)
-    assert len(pc.points) > 0
-    ratio = len(indices) / len(pc.points)
+    indices = bbox3D.get_point_indices_within_bounding_box(pc.point.positions)
+    assert pc.point.positions.shape[0] > 0
+    ratio = indices.shape[0] / pc.point.positions.shape[0]
     # print("ratio ", ratio)
     return ratio, indices
 
 def track_instance(masks, classes, depth, inst_list, sem_dict, intrinsic_open3d, T_CW, IoU_thresh=0.5, voxel_size=0.1,
-                   min_pixels=2000, erode=True, clip_features=None, class_names=None):
+                   min_pixels=2000, erode=True, clip_features=None, class_names=None, device= "cuda:0"):
     # inst_data = np.zeros_like(depth, dtype=np.int)
     inst_data_dict = {}
     inst_ids = []
-    bbox3d_scale = 1.0  # todo 1.0
+    bbox3d_scale = 1.1  # todo 1.0
+
+    intrinsic_open3d = open3d.core.Tensor(intrinsic_open3d.intrinsic_matrix, device=open3d.core.Device(device))
+    T_CW = open3d.core.Tensor(T_CW, device=open3d.core.Device(device))
+
     for i in range(len(masks)):
         inst_data = torch.zeros(depth.shape, dtype=torch.int)
         smaller_mask = cv2.erode(masks[i].astype(np.uint8), np.ones((5, 5)), iterations=3).astype(bool)
+
         inst_depth_small = depth.copy()
         inst_depth_small[~smaller_mask] = 0
-        inst_pc_small = unproject_pointcloud(inst_depth_small, intrinsic_open3d, T_CW)
+
+        if np.sum(inst_depth_small[smaller_mask]) < 0.1:
+            continue
+
+        # with performance_measure(f"unproject {len(masks)}x"):
+        inst_pc_small = back_project_depth_map(inst_depth_small, intrinsic_open3d, T_CW, device)
+
         diff_mask = None
         if np.sum(smaller_mask) <= min_pixels:  # too small    20  400 # todo use sem to set background
             inst_data[masks[i]] = 0  # set to background
             continue
-        inst_pc_voxel = inst_pc_small.voxel_down_sample(voxel_size)
-        if len(inst_pc_voxel.points) <= 10:  # too small    20  400 # todo use sem to set background
+
+        # with performance_measure(f"downsample {len(masks)}x"):
+        inst_pc_ds = inst_pc_small.voxel_down_sample(voxel_size)
+
+        if inst_pc_ds.point.positions.shape[0] <= 10:  # too small    20  400 # todo use sem to set background
             inst_data[masks[i]] = 0  # set to background
             continue
+
         is_merged = False
         inst_id = None
         inst_mask = masks[i] #smaller_mask #masks[i]    # todo only
         inst_class = classes[i]
+
         inst_depth = np.copy(depth)
         inst_depth[~masks[i]] = 0.  # inst_mask
-        inst_pc = unproject_pointcloud(inst_depth, intrinsic_open3d, T_CW)
+
+        inst_pc = back_project_depth_map(inst_depth, intrinsic_open3d, T_CW, device)
         sem_inst_list = []
+
+        # with performance_measure(f"extend {len(masks)}x"):
         if clip_features is not None: # check similar sems based on clip feature distance
-            sem_thr = 320.  # 260.
+            sem_thr = 260.  # 260.
             for sem_exist in sem_dict.keys():
                 if torch.abs(clip_features[class_names[inst_class]] - clip_features[class_names[sem_exist]]).sum() < sem_thr:
                     sem_inst_list.extend(sem_dict[sem_exist])
@@ -142,6 +169,7 @@ def track_instance(masks, classes, depth, inst_list, sem_dict, intrinsic_open3d,
 
         for candidate_inst in sem_inst_list:
     # if True:  # only consider 3D bbox, merge them if they are spatial together
+            # with performance_measure(f"check inside ratio {len(sem_inst_list)}x"):
             IoU, indices = check_inside_ratio(inst_pc, candidate_inst.bbox3D)
             candidate_inst.cmp_cnt += 1
             if IoU > IoU_thresh:
@@ -149,20 +177,32 @@ def track_instance(masks, classes, depth, inst_list, sem_dict, intrinsic_open3d,
                 is_merged = True
                 candidate_inst.merge_cnt += 1
                 candidate_inst.pc += inst_pc.select_by_index(indices)   # only merge pcs inside scale*bbox
-                diff_mask = np.zeros_like(inst_mask)
-                uv_opencv, _ = cv2.projectPoints(np.array(inst_pc.select_by_index(indices).points), T_CW[:3, :3],
-                                                 T_CW[:3, 3], intrinsic_open3d.intrinsic_matrix[:3,:3], None)
-                uv = np.round(uv_opencv).squeeze().astype(int)
-                u = uv[:, 0].reshape(-1, 1)
-                v = uv[:, 1].reshape(-1, 1)
-                vu = np.concatenate([v, u], axis=-1)
-                valid_mask = np.zeros_like(inst_mask)
-                valid_mask[tuple(vu.T)] = True
-                diff_mask[(inst_depth!=0) & (~valid_mask)] = True
+
+                # set_trace()
+                uv_opencv = inst_pc.select_by_index(indices).project_to_depth_image(masks[i].shape[1], masks[i].shape[0], intrinsic_open3d, T_CW, depth_scale=1.0, depth_max=10.0)
+                
+                inst_uv = torch.utils.dlpack.from_dlpack(uv_opencv.as_tensor().to_dlpack())
+                valid_mask = inst_uv.squeeze()  > 0.  # shape --> H, W
+                diff_mask = (torch.from_numpy(inst_depth).to(valid_mask.device) > 0.) & (~valid_mask)
+
+                # cv2.imshow("valid_mask", valid_mask.detach().cpu().numpy().astype(np.uint8))
+                # cv2.waitKey(1)
+
+                # uv_opencv, _ = cv2.projectPoints(np.array(inst_pc.select_by_index(indices).points), T_CW[:3, :3],
+                #                                  T_CW[:3, 3], intrinsic_open3d.intrinsic_matrix[:3,:3], None)
+                # uv = np.round(uv_opencv).squeeze().astype(int)
+                # u = uv[:, 0].reshape(-1, 1)
+                # v = uv[:, 1].reshape(-1, 1)
+                # vu = np.concatenate([v, u], axis=-1)
+                # valid_mask = torch.zeros_like(inst_uv).bool()
+                # valid_mask[tuple(vu.T)] = True
+                # diff_mask = torch.zeros_like(inst_uv)
+                # diff_mask[(inst_depth!=0) & (~valid_mask)] = True
+
                 # downsample pcs
                 candidate_inst.pc = candidate_inst.pc.voxel_down_sample(voxel_size)
                 # candidate_inst.pc.random_down_sample(np.minimum(500//len(candidate_inst.pc.points),1))
-                candidate_inst.bbox3D = open3d.geometry.OrientedBoundingBox.create_from_points(candidate_inst.pc.points)
+                candidate_inst.bbox3D = open3d.t.geometry.AxisAlignedBoundingBox.create_from_points(candidate_inst.pc.point.positions)
                 # enlarge
                 candidate_inst.bbox3D.scale(bbox3d_scale, candidate_inst.bbox3D.get_center())
                 inst_id = candidate_inst.inst_id
@@ -178,7 +218,7 @@ def track_instance(masks, classes, depth, inst_list, sem_dict, intrinsic_open3d,
 
             new_inst.pc = inst_pc_small
             new_inst.pc = new_inst.pc.voxel_down_sample(voxel_size)
-            inst_bbox3D = open3d.geometry.OrientedBoundingBox.create_from_points(new_inst.pc.points)
+            inst_bbox3D = open3d.t.geometry.AxisAlignedBoundingBox.create_from_points(new_inst.pc.point.positions)
             # scale up
             inst_bbox3D.scale(bbox3d_scale, inst_bbox3D.get_center())
             new_inst.bbox3D = inst_bbox3D
