@@ -36,9 +36,13 @@ if __name__ == "__main__":
     parser.add_argument('--config',
                         default='./configs/Replica/ablation/config_replica_room0_bMAP_h32.json',
                         type=str)
+    parser.add_argument('--do_bg',
+                        default=False,
+                        type=bool)
     args = parser.parse_args()
     log_dir = args.logdir
     config_file = args.config
+    do_bg = args.do_bg
     # log_dir = "logs/TUM_vmap_swin_noupdate_latest_frame"   # argparse
     # config_file = "./configs/TUM/config_TUM2_live_bMAP.json"    #
 
@@ -82,6 +86,9 @@ if __name__ == "__main__":
     n_iter_per_frame = config["render"]["iters_per_frame"]
     n_per_optim = config["render"]["n_per_optim"]
     n_samples_per_frame = n_per_optim // win_size #120 // 5
+    win_size_bg = 10
+    n_samples_per_frame_bg = 1200 // win_size_bg
+    n_sample_per_step_bg = n_samples_per_frame_bg * win_size_bg
     n_sample_per_step = n_samples_per_frame * win_size
     depth_scale = 1 / config["trainer"]["scale"]
 
@@ -230,10 +237,10 @@ if __name__ == "__main__":
                     else:
                         inst_mask = inst_data_dict[obj_id].permute(1,0)
                         label_list = torch.unique(inst_mask).tolist()
-                        assert len(label_list) <= 3
-                        print("obj id ", obj_id)
-                        print("label list ", label_list)
-                        assert obj_id in label_list
+                        # assert len(label_list) <= 3
+                        # print("obj id ", obj_id)
+                        # print("label list ", label_list)
+                        # assert obj_id in label_list
                         state = torch.zeros_like(inst_mask, dtype=torch.uint8, device=data_device)
                         state[inst_mask == obj_id] = 1
                         state[inst_mask == -1] = 2
@@ -246,6 +253,18 @@ if __name__ == "__main__":
                         if len(obj_dict.keys()) >= max_n_models:
                             print("models full!!!! current num ", len(obj_dict.keys()))
                             continue
+                        if do_bg and obj_id == 0:   # todo param
+                            config_bg = copy.deepcopy(config)
+                            config_bg["model"]["hidden_feature_size"] = 128
+                            config_bg["render"]["n_bins_cam2surface"] = 5
+                            assert config_bg["render"]["n_bins_cam2surface"] != config["render"]["n_bins_cam2surface"]
+                            config_bg["render"]["n_bins"] = 9
+                            config_bg["model"]["window_size"] = win_size_bg
+                            scene_bg = sceneObject(config_bg, obj_id, data_device, rgb, depth, state, bbox, twc, None,
+                                                    live_frame_id)
+                            optimiser.add_param_group({"params": scene_bg.trainer.fc_occ_map.parameters(), "lr": learning_rate, "weight_decay": weight_decay})
+                            optimiser.add_param_group({"params": scene_bg.trainer.pe.parameters(), "lr": learning_rate, "weight_decay": weight_decay})
+
                         scene_obj = sceneObject(config, obj_id, data_device, rgb, depth, state, bbox, twc, None, live_frame_id)
                         obj_dict.update({obj_id: scene_obj})
                         # params = [scene_obj.trainer.fc_occ_map.parameters(), scene_obj.trainer.pe.parameters()]
@@ -300,6 +319,16 @@ if __name__ == "__main__":
                 Batch_N_input_pcs.append(input_pcs.reshape([input_pcs.shape[0]*input_pcs.shape[1], input_pcs.shape[2], input_pcs.shape[3]]))
                 Batch_N_sampled_z.append(sampled_z.reshape([sampled_z.shape[0]*sampled_z.shape[1], sampled_z.shape[2]]))
 
+                if do_bg and obj_id == 0:
+                    gt_rgb, gt_depth, valid_depth_mask, obj_mask, input_pcs, sampled_z \
+                        = scene_bg.get_training_samples(n_iter_per_frame * win_size_bg, n_samples_per_frame_bg, cam_info.rays_dir_cache)
+                    bg_gt_depth = gt_depth.reshape([gt_depth.shape[0]*gt_depth.shape[1]])
+                    bg_gt_rgb = gt_rgb.reshape([gt_rgb.shape[0] * gt_rgb.shape[1], gt_rgb.shape[2]])
+                    bg_valid_depth_mask = valid_depth_mask
+                    bg_obj_mask = obj_mask
+                    bg_input_pcs = input_pcs.reshape(
+                        [input_pcs.shape[0] * input_pcs.shape[1], input_pcs.shape[2], input_pcs.shape[3]])
+                    bg_sampled_z = sampled_z.reshape([sampled_z.shape[0] * sampled_z.shape[1], sampled_z.shape[2]])
                 # print("input pcs ", input_pcs.shape)
                 # print("gt depth ", gt_depth.shape)
                 # input pcs torch.Size([100, 24, 11, 3])
@@ -346,6 +375,13 @@ if __name__ == "__main__":
             Batch_N_depth_mask = torch.stack(Batch_N_depth_mask).to(training_device)
             Batch_N_obj_mask = torch.stack(Batch_N_obj_mask).to(training_device)
             Batch_N_sampled_z = torch.stack(Batch_N_sampled_z).to(training_device)
+            if do_bg:
+                bg_input_pcs.to(training_device)
+                bg_gt_depth.to(training_device)
+                bg_gt_rgb.to(training_device) / 255.
+                bg_valid_depth_mask.to(training_device)
+                bg_obj_mask.to(training_device)
+                bg_sampled_z.to(training_device)
 
         with performance_measure(f"Training over {len(obj_dict.keys())} objects,"):
             for iter_step in range(n_iter_per_frame):
@@ -390,6 +426,17 @@ if __name__ == "__main__":
                                      batch_gt_depth.detach(), batch_gt_rgb.detach(),
                                      batch_obj_mask.detach(), batch_depth_mask.detach(),
                                      batch_sampled_z.detach())
+
+                if do_bg:
+                    bg_data_idx = slice(iter_step * n_sample_per_step_bg, (iter_step + 1) * n_sample_per_step_bg)
+                    bg_embedding = scene_bg.trainer.pe(bg_input_pcs[bg_data_idx, ...])
+                    bg_alpha, bg_color = scene_bg.trainer.fc_occ_map(bg_embedding)
+                    bg_loss, _ = loss.step_batch_loss(bg_alpha[None, ...], bg_color[None, ...],
+                                                     bg_gt_depth[None, bg_data_idx, ...].detach(), bg_gt_rgb[None, bg_data_idx].detach(),
+                                                     bg_obj_mask[None, bg_data_idx, ...].detach(), bg_valid_depth_mask[None, bg_data_idx, ...].detach(),
+                                                     bg_sampled_z[None, bg_data_idx, ...].detach())
+                    batch_loss += bg_loss
+
             # with performance_measure(f"Backward"):
                 if AMP:
                     # Scales the loss, and calls backward()
@@ -422,6 +469,8 @@ if __name__ == "__main__":
             (live_mode and time.time()-last_frame_time>keep_live_time)) and frame_id >= 10:
             vis3d.clear_geometries()
             for obj_id, obj_k in obj_dict.items():
+                if obj_id == 0 and do_bg:
+                    obj_k = scene_bg
                 # if obj_id == 0:
                 #     continue
                 if obj_k.n_keyframes <= 2:   # too few detections

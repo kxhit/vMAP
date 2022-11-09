@@ -12,6 +12,7 @@ from tqdm import tqdm
 import trainer
 import open3d
 from bidict import bidict
+import copy
 
 class performance_measure:
 
@@ -109,7 +110,7 @@ class sceneObject:
 
     def __init__(self, config, obj_id, device, rgb:torch.tensor, depth:torch.tensor, mask:torch.tensor, bbox_2d:torch.tensor, t_wc:torch.tensor, intrinsic, live_frame_id) -> None:
         # todo move global config params into args
-        self.config = config.copy()
+        self.config = copy.deepcopy(config)
         self.obj_id = obj_id
         self.device = device
 
@@ -244,6 +245,7 @@ class sceneObject:
                 self.lastest_kf_queue.append(self.kf_pointer)
                 pruned_frame_id, pruned_kf_id = self.prune_keyframe()
                 self.kf_pointer = pruned_kf_id
+                print("pruned kf id ", self.kf_pointer)
 
         else:
             if not is_kf:   # not kf, replace
@@ -309,10 +311,11 @@ class sceneObject:
                                          dtype=torch.long,
                                          device=self.device)
             # if self.kf_buffer_full:
-            latest_frame_ids = list(self.kf_id_dict.values())[-2:]
+            # latest_frame_ids = list(self.kf_id_dict.values())[-2:]
+            latest_frame_ids = self.lastest_kf_queue[-2:]
             keyframe_ids = torch.cat([keyframe_ids,
                                           torch.tensor(latest_frame_ids, device=keyframe_ids.device)])
-            print("latest_frame_ids", latest_frame_ids)
+            # print("latest_frame_ids", latest_frame_ids)
             # else:   # sample last 2 frames
             #     keyframe_ids = torch.cat([keyframe_ids,
             #                               torch.tensor([self.n_keyframes-2, self.n_keyframes-1], device=keyframe_ids.device)])

@@ -18,7 +18,7 @@ def step_batch_loss(alpha, color, gt_depth, gt_color, sem_labels, mask_depth, z_
     # opacity_scaling = self.opacity_scaling  # 10.0
     alpha = alpha.squeeze(dim=-1)
     color = color.squeeze(dim=-1)
-    # sem = sem.squeeze(dim=-1)
+    # print("alpha ", alpha.shape)
     occupancy = render_rays.occupancy_activation(alpha)
     termination = render_rays.occupancy_to_termination(occupancy, is_batch=True)  # shape [num_batch, num_ray, points_per_ray]
     # print("termination ", termination.shape)
