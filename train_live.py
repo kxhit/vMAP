@@ -20,6 +20,7 @@ from pathlib import Path
 
 # vmap
 from functorch import vmap
+import argparse
 
 # todo verify on replica
 if __name__ == "__main__":
@@ -29,11 +30,20 @@ if __name__ == "__main__":
     # torch.backends.cuda.matmul.allow_tf32 = True
     # torch.backends.cudnn.allow_tf32 = True
     # init todo arg parser class
+    parser = argparse.ArgumentParser(description='Model training for single GPU')
+    parser.add_argument('--logdir', default='./logs/debug',
+                        type=str)
+    parser.add_argument('--config',
+                        default='./configs/Replica/ablation/config_replica_room0_bMAP_h32.json',
+                        type=str)
+    args = parser.parse_args()
+    log_dir = args.logdir
+    config_file = args.config
     # log_dir = "logs/TUM_vmap_swin_noupdate_latest_frame"   # argparse
     # config_file = "./configs/TUM/config_TUM2_live_bMAP.json"    #
 
-    log_dir = "logs/live/table/bmap_latestframe_s1.0"   # argparse
-    config_file = "./configs/live/config_azure_ros.json"
+    # log_dir = "logs/live/lab/bmap_latestframe_s1.0"   # argparse
+    # config_file = "./configs/live/config_azure_ros_lab_bmap.json"
 
     # log_dir = "logs/replica_vmap_h32"
     # config_file = "./configs/Replica/config_replica_room0_bMAP.json"

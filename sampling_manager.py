@@ -124,6 +124,8 @@ class sceneObject:
         # TODO: what should these be set as??
         self.min_bound = self.config["render"]["depth_range"][0]
         self.max_bound = self.config["render"]["depth_range"][1]
+        self.n_bins_cam2surface = self.config["render"]["n_bins_cam2surface"]
+        self.n_bins = self.config["render"]["n_bins"]
 
         self.n_keyframes = 1  # Number of keyframes
         self.kf_pointer = None
@@ -362,8 +364,8 @@ class sceneObject:
         """
 
         # TODO parametrize those vars
-        n_bins_cam2surface = 1
-        n_bins = 9
+        n_bins_cam2surface = self.n_bins_cam2surface
+        n_bins = self.n_bins
         eps = 0.10
         other_objs_max_eps = 0.02
         # print("max depth ", torch.max(sampled_depth))
