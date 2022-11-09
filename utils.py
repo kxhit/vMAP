@@ -92,15 +92,10 @@ class InstData:
 
 def back_project_depth_map(depth, intrinsic_open3d, T_CW, device):
     # depth, mask, intrinsic, extrinsic -> point clouds
-    depth_o3dt = open3d.t.geometry.Image(open3d.core.Tensor(depth, device=open3d.core.Device(device)))
-    pc_sample = open3d.t.geometry.PointCloud.create_from_depth_image(depth=depth_o3dt, intrinsics=intrinsic_open3d, extrinsics=T_CW, depth_scale=1.0)
+    depth_o3dt = open3d.t.geometry.Image(open3d.core.Tensor.from_dlpack(torch.utils.dlpack.to_dlpack(depth)))
+    pc_sample = open3d.t.geometry.PointCloud.create_from_depth_image(depth=depth_o3dt,
+        intrinsics=intrinsic_open3d, extrinsics=T_CW, depth_scale=1.0)
 
-    # pc_sample = open3d.geometry.PointCloud.create_from_depth_image(depth=open3d.geometry.Image(depth),
-    #                                                                intrinsic=intrinsic_open3d,
-    #                                                                extrinsic=T_CW,
-    #                                                                depth_scale=1.0,
-    #                                                        project_valid_depth_only=True)
-    # assert pc_sample.point.positions.shape[0] > 0
     return pc_sample
 
 def check_inside_ratio(pc, bbox3D):
@@ -112,30 +107,36 @@ def check_inside_ratio(pc, bbox3D):
     return ratio, indices
 
 def track_instance(masks, classes, depth, inst_list, sem_dict, intrinsic_open3d, T_CW, IoU_thresh=0.5, voxel_size=0.1,
-                   min_pixels=2000, erode=True, clip_features=None, class_names=None, device= "cuda:0"):
+                   min_pixels=2000, erode=True, clip_features=None, class_names=None, device="cuda:0"):
     # inst_data = np.zeros_like(depth, dtype=np.int)
     inst_data_dict = {}
     inst_ids = []
     bbox3d_scale = 1.1  # todo 1.0
 
+    # set_trace()
+    torch.cuda.set_device(int(device[-1]))
+
+    depth = torch.from_numpy(depth).to(device)
     intrinsic_open3d = open3d.core.Tensor(intrinsic_open3d.intrinsic_matrix, device=open3d.core.Device(device))
     T_CW = open3d.core.Tensor(T_CW, device=open3d.core.Device(device))
 
-    for i in range(len(masks)):
-        inst_data = torch.zeros(depth.shape, dtype=torch.int)
-        smaller_mask = cv2.erode(masks[i].astype(np.uint8), np.ones((5, 5)), iterations=3).astype(bool)
+    for i in range(masks.shape[0]):
+        inst_data = torch.zeros(depth.shape, dtype=torch.int, device=device)
+        smaller_mask = cv2.erode(masks[i].detach().cpu().numpy().astype(np.uint8), np.ones((5, 5)), iterations=3).astype(bool)
 
-        inst_depth_small = depth.copy()
+        smaller_mask = torch.from_numpy(smaller_mask).to(device)
+
+        inst_depth_small = depth.detach().clone()
         inst_depth_small[~smaller_mask] = 0
 
-        if np.sum(inst_depth_small[smaller_mask]) < 0.1:
+        if inst_depth_small[smaller_mask].sum().item() < 0.1:
             continue
 
         # with performance_measure(f"unproject {len(masks)}x"):
         inst_pc_small = back_project_depth_map(inst_depth_small, intrinsic_open3d, T_CW, device)
 
         diff_mask = None
-        if np.sum(smaller_mask) <= min_pixels:  # too small    20  400 # todo use sem to set background
+        if smaller_mask.sum() <= min_pixels:  # too small    20  400 # todo use sem to set background
             inst_data[masks[i]] = 0  # set to background
             continue
 
@@ -151,7 +152,7 @@ def track_instance(masks, classes, depth, inst_list, sem_dict, intrinsic_open3d,
         inst_mask = masks[i] #smaller_mask #masks[i]    # todo only
         inst_class = classes[i]
 
-        inst_depth = np.copy(depth)
+        inst_depth = depth.detach().clone()
         inst_depth[~masks[i]] = 0.  # inst_mask
 
         inst_pc = back_project_depth_map(inst_depth, intrinsic_open3d, T_CW, device)
@@ -183,7 +184,7 @@ def track_instance(masks, classes, depth, inst_list, sem_dict, intrinsic_open3d,
                 
                 inst_uv = torch.utils.dlpack.from_dlpack(uv_opencv.as_tensor().to_dlpack())
                 valid_mask = inst_uv.squeeze()  > 0.  # shape --> H, W
-                diff_mask = (torch.from_numpy(inst_depth).to(valid_mask.device) > 0.) & (~valid_mask)
+                diff_mask = (inst_depth > 0.) & (~valid_mask)
 
                 # cv2.imshow("valid_mask", valid_mask.detach().cpu().numpy().astype(np.uint8))
                 # cv2.waitKey(1)

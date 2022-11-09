@@ -213,17 +213,13 @@ class Tracking:
                 # init label to background 0
                 obj_np = np.zeros(depth_np.shape, dtype=int)
                 bbox_dict = {}
-
-                frame = rgb_np[0]
                 
                 # Run detector
                 with performance_measure(f"Detection"):
                     with torch.cuda.amp.autocast():
-                        results = self.detector.detect(frame)["instances"].to("cpu")
-                    classes = results.pred_classes.tolist()
-                    masks = list(np.asarray(results.pred_masks))
-
-                # masks = results.pred_masks.tolist()
+                        results = self.detector.detect(rgb_np[0])["instances"]
+                    classes = results.pred_classes.detach().clone()
+                    masks = results.pred_masks.detach().clone()
 
                 # overlap_mask = torch.from_numpy(np.asarray(results.pred_masks)).sum(dim=0)
                 # vis_overlap = imgviz.label2rgb(overlap_mask.numpy())
