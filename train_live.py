@@ -75,7 +75,7 @@ if __name__ == "__main__":
     # data_device = "cpu"
     data_device ="cuda:0"
     # vis_device = "cuda:1"
-    max_n_models = 100   #config["trainer"]["n_models"]   # max models number
+    max_n_models = 20   #config["trainer"]["n_models"]   # max models number
     live_mode = config["dataset"]["live"]
     if live_mode:
         keep_live_time = 20.    # after this waiting time, finish training and then eval
@@ -264,6 +264,16 @@ if __name__ == "__main__":
                                                     live_frame_id)
                             optimiser.add_param_group({"params": scene_bg.trainer.fc_occ_map.parameters(), "lr": learning_rate, "weight_decay": weight_decay})
                             optimiser.add_param_group({"params": scene_bg.trainer.pe.parameters(), "lr": learning_rate, "weight_decay": weight_decay})
+                            # ###################################
+                            # # measure trainable params in total
+                            # total_params = 0
+                            # for p in scene_bg.trainer.fc_occ_map.parameters():
+                            #     if p.requires_grad:
+                            #         total_params += p.numel()
+                            # for p in scene_bg.trainer.pe.parameters():
+                            #     if p.requires_grad:
+                            #         total_params += p.numel()
+                            # print("total param scene_bg ", total_params)
 
                         scene_obj = sceneObject(config, obj_id, data_device, rgb, depth, state, bbox, twc, None, live_frame_id)
                         obj_dict.update({obj_id: scene_obj})

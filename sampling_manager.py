@@ -372,7 +372,7 @@ class sceneObject:
         n_bins_cam2surface = self.n_bins_cam2surface
         n_bins = self.n_bins
         eps = 0.10
-        other_objs_max_eps = 0.02
+        other_objs_max_eps = 0.05   # todo 0.02
         # print("max depth ", torch.max(sampled_depth))
         sampled_z = torch.zeros(
             sampled_rgbs.shape[0] * sampled_rgbs.shape[1],
