@@ -6,3 +6,10 @@ trimesh
 scikit-image
 imgviz
 h5py
+
+bidict
+fvcore
+omegaconf
+pycocotools
+git+https://github.com/openai/CLIP.git
+timm
