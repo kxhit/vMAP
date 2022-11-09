@@ -202,7 +202,7 @@ def track_instance(masks, classes, depth, inst_list, sem_dict, intrinsic_open3d,
             # inst_data_list[idx] = inst_data_list[idx] & torch.from_numpy(inst_data) # merge them? todo
     # return inst_data
     mask_bg = torch.stack(list(inst_data_dict.values())).sum(0) != 0
-    inst_data_dict.update({0: mask_bg.astype(torch.int)})
+    inst_data_dict.update({0: mask_bg.int()})
     return inst_data_dict
 
 
