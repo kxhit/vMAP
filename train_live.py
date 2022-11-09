@@ -231,6 +231,8 @@ if __name__ == "__main__":
                         inst_mask = inst_data_dict[obj_id].permute(1,0)
                         label_list = torch.unique(inst_mask).tolist()
                         assert len(label_list) <= 3
+                        print("obj id ", obj_id)
+                        print("label list ", label_list)
                         assert obj_id in label_list
                         state = torch.zeros_like(inst_mask, dtype=torch.uint8, device=data_device)
                         state[inst_mask == obj_id] = 1

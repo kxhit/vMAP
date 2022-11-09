@@ -11,21 +11,19 @@ def calc_3d_metric(mesh_rec, mesh_gt, N=200000):
     # todo infer network inside 3D bbox to get per obj mesh
     """
     metrics = [[] for _ in range(6)]
-    # mesh_rec = trimesh.load(rec_meshfile, process=False)
-    # mesh_gt = trimesh.load(gt_meshfile, process=False)
-    transform, extents = trimesh.bounds.oriented_bounds(mesh_gt)
-    extents = extents / 0.9 # enlarge 0.9
-    box = trimesh.creation.box(extents=extents, transform=np.linalg.inv(transform))
-    # box = trimesh.creation.box(extents=extents, transform=transform)
-    # print("extents ", extents)
-    # print("transform ", transform)
-    # print("box ", box)
-    # print("mesh ", mesh_rec)
-    mesh_rec = mesh_rec.slice_plane(box.facets_origin, -box.facets_normal)
-    # print("mesh ", mesh_rec)
-    if mesh_rec.vertices.shape[0] == 0:
-        print("no mesh found")
-        return
+    # transform, extents = trimesh.bounds.oriented_bounds(mesh_gt)
+    # extents = extents / 0.9 # enlarge 0.9
+    # box = trimesh.creation.box(extents=extents, transform=np.linalg.inv(transform))
+    # # box = trimesh.creation.box(extents=extents, transform=transform)
+    # # print("extents ", extents)
+    # # print("transform ", transform)
+    # # print("box ", box)
+    # # print("mesh ", mesh_rec)
+    # mesh_rec = mesh_rec.slice_plane(box.facets_origin, -box.facets_normal)
+    # # print("mesh ", mesh_rec)
+    # if mesh_rec.vertices.shape[0] == 0:
+    #     print("no mesh found")
+    #     return
     # mesh_rec.show()
     rec_pc = trimesh.sample.sample_surface(mesh_rec, N) # todo not sample globally
     rec_pc_tri = trimesh.PointCloud(vertices=rec_pc[0])

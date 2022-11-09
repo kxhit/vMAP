@@ -198,7 +198,9 @@ class Tracking:
 
         if self.imap_mode:
             obj_np = np.zeros_like(depth_np, dtype=np.int)
-            bbox_dict = {0: torch.from_numpy(np.array([int(0), int(0), depth_np.shape[1], depth_np.shape[0]]).reshape(1, -1))}
+            bbox_dict = {}
+            bbox_dict.update(
+                {0: torch.from_numpy(np.array([int(0), int(depth_np.shape[0]), 0, int(depth_np.shape[1])]))})  # bbox order
             depth_np[(depth_np > self.max_depth) | (depth_np < self.min_depth)] = 0
         else:
             # init label to background 0
@@ -235,6 +237,10 @@ class Tracking:
                                        class_names=self.class_names)
             print("track instance time ", time.time()-track_instance_time)
             for obj_id, mask in (inst_data_dict.items()):
+                if obj_id == 0:
+                    bbox_dict.update({0: torch.from_numpy(
+                            np.array([int(0), int(depth_np.shape[0]), 0, int(depth_np.shape[1])]))})  # bbox order
+                    continue
                 bbox2d = get_bbox2d(mask.numpy(), bbox_scale=self.bbox_scale)
                 if bbox2d is None:
                     inst_data_dict.remove(obj_id)   # delete
@@ -271,7 +277,7 @@ class Tracking:
             # cv2.waitKey(1)
 
             overlap_mask = torch.stack(list(inst_data_dict.values())).sum(dim=0)
-            vis_overlap = imgviz.label2rgb(overlap_mask.numpy())
+            vis_overlap = imgviz.label2rgb(overlap_mask.numpy(), colormap=self.inst_color_map)
             cv2.imshow("overlap merged", vis_overlap)
             cv2.waitKey(1)
         # send data to mapping -------------------------------------------

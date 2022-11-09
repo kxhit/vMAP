@@ -107,6 +107,7 @@ def track_instance(masks, classes, depth, inst_list, sem_dict, intrinsic_open3d,
                    min_pixels=2000, erode=True, clip_features=None, class_names=None):
     # inst_data = np.zeros_like(depth, dtype=np.int)
     inst_data_dict = {}
+    inst_data_dict.update({0: torch.zeros(depth.shape, dtype=torch.int)})
     inst_ids = []
     bbox3d_scale = 1.0  # todo 1.0
     for i in range(len(masks)):
@@ -200,9 +201,8 @@ def track_instance(masks, classes, depth, inst_list, sem_dict, intrinsic_open3d,
             # idx = inst_ids.index(inst_id)
             # inst_data_list[idx] = inst_data_list[idx] & torch.from_numpy(inst_data) # merge them? todo
     # return inst_data
-    if 0 not in inst_data_dict.keys():
-        mask_bg = torch.stack(list(inst_data_dict.values())) == 0
-        inst_data_dict.update({0:mask_bg})
+    mask_bg = torch.stack(list(inst_data_dict.values())).sum(0) != 0
+    inst_data_dict.update({0: mask_bg.astype(torch.int)})
     return inst_data_dict
 
 
