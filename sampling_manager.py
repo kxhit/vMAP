@@ -134,7 +134,9 @@ class sceneObject:
         if self.live_mode:
             self.keyframe_step = 10
         else:
-            self.keyframe_step = 25 # for bg
+            self.keyframe_step = 25
+            if self.obj_id == 0:
+                self.keyframe_step = 50 # for bg
 
         self.kf_id_dict = bidict({live_frame_id:0})
         self.kf_buffer_full = False
