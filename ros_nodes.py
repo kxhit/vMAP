@@ -238,7 +238,11 @@ class Tracking:
                                             class_names=self.class_names)
 
                 for obj_id, mask in (inst_data_dict.items()):
-                    bbox2d = get_bbox2d(mask.numpy(), bbox_scale=self.bbox_scale)
+                    # viz_mask = imgviz.label2rgb(mask.cpu().numpy().astype(np.int), colormap=self.inst_color_map)
+                    # cv2.imshow(f"mask_{obj_id}", viz_mask)
+                    # cv2.waitKey(1)
+
+                    bbox2d = get_bbox2d(mask.detach().cpu().numpy(), bbox_scale=self.bbox_scale)
                     if bbox2d is None:
                         inst_data_dict.remove(obj_id)   # delete
                         continue
@@ -273,11 +277,11 @@ class Tracking:
                 # # cv2.imshow("merged", imgviz.label2rgb(inst_data, colormap=self.inst_color_map))
                 # cv2.waitKey(1)
 
-                overlap_mask = torch.stack(list(inst_data_dict.values())).sum(dim=0)
-                vis_overlap = imgviz.label2rgb(overlap_mask.numpy(), colormap=self.inst_color_map)
+                # overlap_mask = torch.stack(list(inst_data_dict.values())).sum(dim=0)
+                # vis_overlap = imgviz.label2rgb(overlap_mask.cpu().numpy(), colormap=self.inst_color_map)
 
-                cv2.imshow("overlap merged", vis_overlap)
-                cv2.waitKey(1)
+                # cv2.imshow("overlap merged", vis_overlap)
+                # cv2.waitKey(1)
             # send data to mapping -------------------------------------------
             with performance_measure(f"pushing to mapping thread"):
                 rgb = torch.from_numpy(rgb_np[0]).permute(1,0,2)
