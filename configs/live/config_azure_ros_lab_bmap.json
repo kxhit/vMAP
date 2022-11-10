@@ -43,7 +43,7 @@
         "gauss_embed_std": 175,
         "n_unidir_funcs": 5,
         "obj_scale": 1.0,
-        "bg_scale": 5.0,
+        "bg_scale": 10.0,
         "color_scaling": 5.0,
         "opacity_scaling": 10.0,
         "do_view_dirs": 0,

@@ -21,7 +21,7 @@
     },
     "render": {
         "n_rays": 1200,
-        "depth_range": [0.0, 6.0],
+        "depth_range": [0.0, 3.5],
         "n_bins": 9,
         "n_bins_cam2surface": 1,
         "bins_fine": 10,

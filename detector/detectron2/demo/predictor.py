@@ -33,7 +33,7 @@ def setup_cfg(
               opts=['MODEL.WEIGHTS', './detector/Detic/Detic_LCOCOI21k_CLIP_SwinB_896b32_4x_ft4x_max-size.pth'],
               # config_file='./detector/Detic/configs/Detic_LCOCOI21k_CLIP_R5021k_640b32_4x_ft4x_max-size.yaml',
               # opts=['MODEL.WEIGHTS', './detector/Detic/Detic_LCOCOI21k_CLIP_R5021k_640b32_4x_ft4x_max-size.pth'],
-              confidence_threshold=0.8):
+              confidence_threshold=0.7):    # 0.8
     cfg = get_cfg()
     add_centernet_config(cfg)
     add_detic_config(cfg)

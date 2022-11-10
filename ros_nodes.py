@@ -123,7 +123,7 @@ class Tracking:
                 cx=self.cx,
                 cy=self.cy,
             )
-        self.min_pixels = 200
+        self.min_pixels = 2000  # 200 for table
 
         self.inst_color_map = imgviz.label_colormap(n_label=2000)
         self.cv_bridge = CvBridge()
@@ -236,12 +236,15 @@ class Tracking:
                                        clip_features=self.clip_features,
                                        class_names=self.class_names)
             print("track instance time ", time.time()-track_instance_time)
+            assert 0 in inst_data_dict.keys()
             for obj_id, mask in (inst_data_dict.items()):
                 if obj_id == 0:
                     bbox_dict.update({0: torch.from_numpy(
                             np.array([int(0), int(depth_np.shape[0]), 0, int(depth_np.shape[1])]))})  # bbox order
                     continue
-                bbox2d = get_bbox2d(mask.numpy(), bbox_scale=self.bbox_scale)
+                # todo handle mask no countours
+                binary_mask = mask == obj_id
+                bbox2d = get_bbox2d(binary_mask.numpy(), bbox_scale=self.bbox_scale)
                 if bbox2d is None:
                     inst_data_dict.remove(obj_id)   # delete
                     continue

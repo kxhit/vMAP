@@ -133,7 +133,9 @@ class sceneObject:
         self.keyframe_buffer_size = 20 #20 10
         self.live_mode = bool(self.config["dataset"]["live"])
         if self.live_mode:
-            self.keyframe_step = 10
+            self.keyframe_step = 5 # 10 for table
+            if self.obj_id == 0:
+                self.keyframe_step = 10 # for bg
         else:
             self.keyframe_step = 25
             if self.obj_id == 0:
@@ -382,12 +384,13 @@ class sceneObject:
 
         # TODO: parametrize what is considered as zero depth
         invalid_depth_mask = (sampled_depth < 0.001).view(-1)
-
+        # max_bound = self.max_bound
+        max_bound = torch.max(sampled_depth)
         # sampling for points with invalid depth
         invalid_depth_count = invalid_depth_mask.count_nonzero()
         if invalid_depth_count:
             sampled_z[invalid_depth_mask, :] = stratified_bins(
-                self.min_bound, self.max_bound,
+                self.min_bound, max_bound,
                 n_bins_cam2surface + n_bins, invalid_depth_count,
                 device=self.device)
 

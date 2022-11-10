@@ -75,7 +75,7 @@ if __name__ == "__main__":
     # data_device = "cpu"
     data_device ="cuda:0"
     # vis_device = "cuda:1"
-    max_n_models = 20   #config["trainer"]["n_models"]   # max models number
+    max_n_models = 100 # 30 for table seq   #config["trainer"]["n_models"]   # max models number
     live_mode = config["dataset"]["live"]
     if live_mode:
         keep_live_time = 20.    # after this waiting time, finish training and then eval
@@ -249,6 +249,9 @@ if __name__ == "__main__":
                         scene_obj = obj_dict[obj_id]
                         # with performance_measure(f"single append"):
                         scene_obj.append_keyframe(rgb, depth, state, bbox, twc, live_frame_id)
+                        if do_bg and obj_id == 0:
+                            scene_bg.append_keyframe(rgb, depth, state, bbox, twc, live_frame_id)
+
                     else: # init scene_obj
                         if len(obj_dict.keys()) >= max_n_models:
                             print("models full!!!! current num ", len(obj_dict.keys()))
@@ -483,8 +486,8 @@ if __name__ == "__main__":
                     obj_k = scene_bg
                 # if obj_id == 0:
                 #     continue
-                if obj_k.n_keyframes <= 2:   # too few detections
-                    continue
+                # if obj_k.n_keyframes <= 1:   # too few detections
+                #     continue
                 bound = obj_k.get_bound(intrinsic_open3d)
                 print("obj ", obj_id)
                 print("bound ", bound)
@@ -494,6 +497,7 @@ if __name__ == "__main__":
                     continue
                 voxel_size = 0.01
                 adaptive_grid_dim = int(np.minimum(np.max(bound.extent)//voxel_size+1, 256))
+                # adaptive_grid_dim = 256
                 mesh = obj_k.trainer.meshing(bound, obj_k.obj_center, grid_dim=adaptive_grid_dim)
                 if mesh is None:
                     print("meshing failed obj ", obj_id)
