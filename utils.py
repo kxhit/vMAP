@@ -48,6 +48,8 @@ def get_bbox2d(obj_mask, bbox_scale=1.0):
     # max_index = np.argmax(areas)
     # cnt = contours[max_index]
     # Concatenate all contours
+    if len(contours) == 0:
+        return None
     cnt = np.concatenate(contours)
     x, y, w, h = cv2.boundingRect(cnt)  # todo if multiple contours, choose the outmost one?
     # x, y, w, h = cv2.boundingRect(contours)
@@ -110,8 +112,10 @@ def track_instance(masks, classes, depth, inst_list, sem_dict, intrinsic_open3d,
                    min_pixels=2000, erode=True, clip_features=None, class_names=None, device="cuda:0"):
     # inst_data = np.zeros_like(depth, dtype=np.int)
     inst_data_dict = {}
+    # inst_data_dict.update({0: torch.zeros(depth.shape, dtype=torch.int)})
     inst_ids = []
     bbox3d_scale = 1.1  # todo 1.0
+    min_extent = 0.05
 
     # set_trace()
     torch.cuda.set_device(int(device[-1]))
@@ -206,6 +210,7 @@ def track_instance(masks, classes, depth, inst_list, sem_dict, intrinsic_open3d,
                 candidate_inst.bbox3D = open3d.t.geometry.AxisAlignedBoundingBox.create_from_points(candidate_inst.pc.point.positions)
                 # enlarge
                 candidate_inst.bbox3D.scale(bbox3d_scale, candidate_inst.bbox3D.get_center())
+                # candidate_inst.bbox3D.extent = np.maximum(candidate_inst.bbox3D.extent, min_extent) # at least bigger than min_extent
                 inst_id = candidate_inst.inst_id
                 break
             # if candidate_inst.cmp_cnt >= 20 and candidate_inst.merge_cnt <= 5:
@@ -222,6 +227,7 @@ def track_instance(masks, classes, depth, inst_list, sem_dict, intrinsic_open3d,
             inst_bbox3D = open3d.t.geometry.AxisAlignedBoundingBox.create_from_points(new_inst.pc.point.positions)
             # scale up
             inst_bbox3D.scale(bbox3d_scale, inst_bbox3D.get_center())
+            # inst_bbox3D.extent = np.maximum(inst_bbox3D.extent, min_extent)
             new_inst.bbox3D = inst_bbox3D
             inst_list.append(new_inst)
             inst_id = new_inst.inst_id
@@ -241,6 +247,8 @@ def track_instance(masks, classes, depth, inst_list, sem_dict, intrinsic_open3d,
             # idx = inst_ids.index(inst_id)
             # inst_data_list[idx] = inst_data_list[idx] & torch.from_numpy(inst_data) # merge them? todo
     # return inst_data
+    # mask_bg = torch.stack(list(inst_data_dict.values())).sum(0) != 0
+    # inst_data_dict.update({0: mask_bg.int()})
     return inst_data_dict
 
 

@@ -15,13 +15,13 @@
     },
     "trainer": {
         "imap_mode": 0,
-        "n_models": 50,
+        "n_models": 100,
         "epochs": 20,
         "scale": 1.0
     },
     "render": {
         "n_rays": 1200,
-        "depth_range": [0.0, 3.5],
+        "depth_range": [0.05, 1.6],
         "n_bins": 9,
         "n_bins_cam2surface": 1,
         "bins_fine": 10,
@@ -31,8 +31,8 @@
         "iters_per_kf": 21,
         "iters_per_frame": 20,
         "n_per_optim": 120,
-        "kf_dist_th": 0.1,
-        "kf_pixel_ratio": 0.70
+        "kf_dist_th": 0.05,
+        "kf_pixel_ratio": 0.80
     },
     "model": {
         "noise_std": 0.0,
@@ -80,22 +80,29 @@
         "label_cam": 0
     },
     "camera": {
-        "w": 640,
-        "h": 480,
-        "fx": 520.908620,
-        "fy": 521.007327,
-        "cx": 325.141442,
-        "cy": 249.701764,
-        "mw": 8,
-        "mh": 8,
-        "distortion": [0.2312, -0.7849, -0.0033, -0.0001, 0.9172]
+        "w": 1280,
+        "h": 720,
+        "fx": 606.060425,
+        "fy": 605.906494,
+        "cx": 642.460449,
+        "cy": 362.501892,
+        "mw": 40,
+        "mh": 20,
+        "k1": -0.236053,
+        "k2": -2.424712,
+        "k3": 1.915454,
+        "k4": -0.352212,
+        "k5": -2.198865,
+        "k6": 1.793799,
+        "p1": -0.000067,
+        "p2": -0.000392
     },
     "vis": {
         "n_vis_iter": 100000,
-        "n_bins_fine_vis": 10,
+        "n_bins_fine_vis": 20,
         "im_vis_reduce": 3,
         "grid_dim": 256,
         "live_vis": 1,
-        "live_voxel_size": 0.005
+        "live_voxel_size": 0.02
     }
 }

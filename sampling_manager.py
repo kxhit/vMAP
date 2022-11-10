@@ -12,6 +12,7 @@ from tqdm import tqdm
 import trainer
 import open3d
 from bidict import bidict
+import copy
 
 class performance_measure:
 
@@ -109,7 +110,7 @@ class sceneObject:
 
     def __init__(self, config, obj_id, device, rgb:torch.tensor, depth:torch.tensor, mask:torch.tensor, bbox_2d:torch.tensor, t_wc:torch.tensor, intrinsic, live_frame_id) -> None:
         # todo move global config params into args
-        self.config = config.copy()
+        self.config = copy.deepcopy(config)
         self.obj_id = obj_id
         self.device = device
 
@@ -132,9 +133,13 @@ class sceneObject:
         self.keyframe_buffer_size = 20 #20 10
         self.live_mode = bool(self.config["dataset"]["live"])
         if self.live_mode:
-            self.keyframe_step = 10
+            self.keyframe_step = 5 # 10 for table
+            if self.obj_id == 0:
+                self.keyframe_step = 10 # for bg
         else:
-            self.keyframe_step = 25 # for bg
+            self.keyframe_step = 25
+            if self.obj_id == 0:
+                self.keyframe_step = 50 # for bg
 
         self.kf_id_dict = bidict({live_frame_id:0})
         self.kf_buffer_full = False
@@ -242,6 +247,7 @@ class sceneObject:
                 self.lastest_kf_queue.append(self.kf_pointer)
                 pruned_frame_id, pruned_kf_id = self.prune_keyframe()
                 self.kf_pointer = pruned_kf_id
+                print("pruned kf id ", self.kf_pointer)
 
         else:
             if not is_kf:   # not kf, replace
@@ -307,10 +313,11 @@ class sceneObject:
                                          dtype=torch.long,
                                          device=self.device)
             # if self.kf_buffer_full:
-            latest_frame_ids = list(self.kf_id_dict.values())[-2:]
+            # latest_frame_ids = list(self.kf_id_dict.values())[-2:]
+            latest_frame_ids = self.lastest_kf_queue[-2:]
             keyframe_ids = torch.cat([keyframe_ids,
                                           torch.tensor(latest_frame_ids, device=keyframe_ids.device)])
-            print("latest_frame_ids", latest_frame_ids)
+            # print("latest_frame_ids", latest_frame_ids)
             # else:   # sample last 2 frames
             #     keyframe_ids = torch.cat([keyframe_ids,
             #                               torch.tensor([self.n_keyframes-2, self.n_keyframes-1], device=keyframe_ids.device)])
@@ -367,7 +374,7 @@ class sceneObject:
         n_bins_cam2surface = self.n_bins_cam2surface
         n_bins = self.n_bins
         eps = 0.10
-        other_objs_max_eps = 0.02
+        other_objs_max_eps = 0.05   # todo 0.02
         # print("max depth ", torch.max(sampled_depth))
         sampled_z = torch.zeros(
             sampled_rgbs.shape[0] * sampled_rgbs.shape[1],
@@ -377,12 +384,13 @@ class sceneObject:
 
         # TODO: parametrize what is considered as zero depth
         invalid_depth_mask = (sampled_depth < 0.001).view(-1)
-
+        # max_bound = self.max_bound
+        max_bound = torch.max(sampled_depth)
         # sampling for points with invalid depth
         invalid_depth_count = invalid_depth_mask.count_nonzero()
         if invalid_depth_count:
             sampled_z[invalid_depth_mask, :] = stratified_bins(
-                self.min_bound, self.max_bound,
+                self.min_bound, max_bound,
                 n_bins_cam2surface + n_bins, invalid_depth_count,
                 device=self.device)
 

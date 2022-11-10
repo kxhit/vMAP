@@ -10,7 +10,7 @@ class Trainer:
     def __init__(self, config, obj_id):
         # todo set param
         self.obj_id = obj_id
-        self.config = config.copy()
+        self.config = config
         self.device = "cuda:0"
         do_seperate_bg = False
         if self.obj_id == 0:

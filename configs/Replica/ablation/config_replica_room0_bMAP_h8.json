@@ -1,76 +1,77 @@
 {
     "dataset": {
-        "live": 1,
-        "ims_file": "",
-        "scene_file": "",
-        "traj_file": "",
-        "format": ""
+        "live": 0,
+        "ims_file": "./data/Replica/replica_v1/room_0/imap/00/",
+        "scene_file": "./data/Replica/replica_v1/room_0/mesh.ply",
+        "traj_file": "./data/Replica/replica_v1/room_0/imap/00/traj_w_c.txt",
+        "im_indices": [0, 10, 20, 50, 100, 200, 300, 400, 500, 1000],
+        "n_random_views": 20,
+        "format": "replica"
     },
     "optimizer": {
         "args":{
-            "lr": 0.0014,
+            "lr": 0.001,
             "weight_decay": 0.013,
-            "pose_lr": 0.002
+            "pose_lr": 0.001
         }
     },
     "trainer": {
         "imap_mode": 0,
-        "n_models": 50,
-        "epochs": 20,
-        "scale": 1.0
+        "n_models": 100,
+        "epochs": 1000000,
+        "scale": 1000.0
     },
     "render": {
         "n_rays": 1200,
-        "depth_range": [0.0, 3.5],
+        "depth_range": [0.0, 8.0],
         "n_bins": 9,
         "n_bins_cam2surface": 1,
-        "bins_fine": 10,
+        "bins_fine": 12,
         "pyramid_levels": 1,
-        "iters_per_level": 50,
+        "iters_per_level": 20,
         "kernel_init": 14,
         "iters_per_kf": 21,
         "iters_per_frame": 20,
         "n_per_optim": 120,
-        "kf_dist_th": 0.1,
-        "kf_pixel_ratio": 0.70
+        "kf_dist_th": 0.05,
+        "kf_pixel_ratio": 0.80
     },
     "model": {
         "noise_std": 0.0,
         "noise_kf": 0.0,
         "noise_frame": 0.0,
         "gauss_embed": 0,
-        "n_embed_funcs": 25,
-        "gauss_embed_std": 175,
+        "n_embed_funcs": 15,
+        "gauss_embed_std": 22,
         "n_unidir_funcs": 5,
-        "obj_scale": 1.0,
+        "obj_scale": 2.0,
         "bg_scale": 5.0,
         "color_scaling": 5.0,
         "opacity_scaling": 10.0,
         "do_view_dirs": 0,
         "gt_traj": 1,
-        "gt_scene": 0,
+        "gt_scene": 1,
         "gt_sem": 1,
         "do_occ": 0,
-        "occ_scale": 0.01,
-        "occ_eps": 0.1,
+        "occ_scale": 30,
+        "occ_eps": 0.05,
         "depth_eps": 0.1,
         "keyframe_select": 1,
         "window_size": 5,
         "n_rays_is_kf": 400,
         "do_tsdf": 0,
         "hidden_layers_block": 1,
-        "hidden_feature_size": 32
+        "hidden_feature_size": 8
     },
     "track": {
-        "lr": 0.004,
-        "max_iters": 4,
-        "min_iters": 3,
-        "delta_th": 0.0025,
-        "track_color": 0,
-        "n_rays_track": 220,
-        "n_bins_track": 42,
-        "n_bins_fine_track": 10
-
+        "lr": 0.01,
+        "max_iters": 20,
+        "min_iters": 8,
+        "delta_th": 0.003,
+        "track_color": 1,
+        "n_rays_track": 300,
+        "n_bins_track": 32,
+        "n_bins_fine_track": 12
     },
     "semantics": {
         "n_classes": 2,
@@ -78,22 +79,22 @@
         "h_levels": 3,
         "do_names": 0,
         "label_cam": 0
+
     },
     "camera": {
-        "w": 640,
-        "h": 480,
-        "fx": 520.908620,
-        "fy": 521.007327,
-        "cx": 325.141442,
-        "cy": 249.701764,
-        "mw": 8,
-        "mh": 8,
-        "distortion": [0.2312, -0.7849, -0.0033, -0.0001, 0.9172]
+        "w": 1200,
+        "h": 680,
+        "fx": 600.0,
+        "fy": 600.0,
+        "cx": 599.5,
+        "cy": 339.5,
+        "mw": 0,
+        "mh": 0
     },
     "vis": {
         "n_vis_iter": 100000,
         "n_bins_fine_vis": 10,
-        "im_vis_reduce": 3,
+        "im_vis_reduce": 10,
         "grid_dim": 256,
         "live_vis": 1,
         "live_voxel_size": 0.005

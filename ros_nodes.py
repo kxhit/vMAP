@@ -126,7 +126,7 @@ class Tracking:
                 cx=self.cx,
                 cy=self.cy,
             )
-        self.min_pixels = 200
+        self.min_pixels = 2000  # 200 for table
 
         self.inst_color_map = imgviz.label_colormap(n_label=2000)
         self.cv_bridge = CvBridge()
@@ -235,12 +235,12 @@ class Tracking:
                                             self.intrinsic_open3d,
                                             T_CW, voxel_size=0.01, min_pixels=self.min_pixels, erode=False,
                                             clip_features=self.clip_features,
-                                            class_names=self.class_names)
+                                            class_names=self.class_names, device=f"{masks.device.type}:{masks.device.index}")
 
                 for obj_id, mask in (inst_data_dict.items()):
-                    # viz_mask = imgviz.label2rgb(mask.cpu().numpy().astype(np.int), colormap=self.inst_color_map)
-                    # cv2.imshow(f"mask_{obj_id}", viz_mask)
-                    # cv2.waitKey(1)
+                    viz_mask = imgviz.label2rgb(mask.detach().cpu().numpy().astype(np.int), colormap=self.inst_color_map)
+                    cv2.imshow(f"mask_{obj_id}", viz_mask)
+                    cv2.waitKey(1)
 
                     bbox2d = get_bbox2d(mask.detach().cpu().numpy(), bbox_scale=self.bbox_scale)
                     if bbox2d is None:
