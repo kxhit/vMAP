@@ -56,7 +56,7 @@ python2 reader.py --filename ~/data/ScanNet/scannet/scans/scene0024_00/scene0024
 
 ## Config
 
-Then update the config files in *configs/.json* with your dataset paths, as well as other training hyper-parameters.
+Then update the config files in `configs/.json` with your dataset paths, as well as other training hyper-parameters.
 ```json
 "dataset": {
         "path": "path/to/ims/folder/",
@@ -65,6 +65,7 @@ Then update the config files in *configs/.json* with your dataset paths, as well
 
 ## Running vMAP / iMAP
 The following commands will run vMAP / iMAP in a single-thread setting (singe GPU for both training and visualisation).
+
 [comment]: <> (### Single thread demo)
 #### vMAP
 ```bash
