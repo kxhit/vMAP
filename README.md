@@ -15,8 +15,8 @@
     <a href="https://www.doc.ic.ac.uk/~ajd/"><strong>Andrew Davison</strong></a>
   </p>
 
-[comment]: <> (  <h2 align="center">arXiv</h2>)
-  <h3 align="center"><a href="https://arxiv.org/abs/TODO">arXiv</a> | Video | <a href="https://kxhit.github.io/vMAP">Project Page</a></h3>
+[comment]: <> (  <h2 align="center">PAPER</h2>)
+  <h3 align="center"><a href="https://arxiv.org/abs/TODO">Paper</a> | Video | <a href="https://kxhit.github.io/vMAP">Project Page</a></h3>
   <div align="center"></div>
 </p>
 <p align="center">
@@ -29,65 +29,50 @@ vMAP builds an object-level map from a real-time RGB-D input stream. Each object
 </p>
 <br>
 
+We provide the implementation of the following neural-field SLAM frameworks:
+- **vMAP** [Official Implementation] 
+- **iMAP** [Improved Official Implementation, with guided depth sampling]
 
 
-<br>
 
-<!-- TABLE OF CONTENTS -->
-<details open="open" style='padding: 10px; border-radius:5px 30px 30px 5px; border-style: solid; border-width: 1px;'>
-  <summary>Table of Contents</summary>
-  <ol>
-    <li>
-      <a href="#Install">Installation</a>
-    </li>
-    <li>
-      <a href="#Run">Run</a>
-    </li>
-    <li>
-      <a href="#Evaluation">Evaluation</a>
-    </li>
-    <li>
-      <a href="#Acknowledgement">Acknowledgement</a>
-    </li>
-    <li>
-      <a href="#Citation">Citation</a>
-    </li>
-  </ol>
-</details>
-
-This repo contains implementation of vMAP (official) and a simplified / improved iMAP* (non-official).
 ## Install
+First, let's start with a virtual environment with the required dependencies.
 ```bash
 conda env create -f environment.yml
 ```
 
 ## Dataset
-* [Replica Demo](https://huggingface.co/datasets/kxic/vMAP/resolve/main/demo_replica_room_0.zip)
-* [Replica](https://huggingface.co/datasets/kxic/vMAP/resolve/main/vmap.zip)
-* [ScanNet](https://github.com/ScanNet/ScanNet)
+Please download the following datasets to reproduce our results.
+
+* [Replica Demo](https://huggingface.co/datasets/kxic/vMAP/resolve/main/demo_replica_room_0.zip) - Replica Room 0 only for faster experimentation.
+* [Replica](https://huggingface.co/datasets/kxic/vMAP/resolve/main/vmap.zip) - All Replica sequences.
+* [ScanNet](https://github.com/ScanNet/ScanNet) - Official ScanNet sequences.
+Each dataset contains a sequence of RGB-D images, as well as their corresponding camera poses, and object instance labels.
+
 ```bash
 conda activate py2
 python2 reader.py --filename ~/data/ScanNet/scannet/scans/scene0024_00/scene0024_00.sens --output_path ~/data/ScanNet/objnerf/ --export_depth_images --export_color_images --export_poses --export_intrinsics
 ```
 
 ## Config
-Change dataset paths in *configs/.json*:
+
+Then update the config files in *configs/.json* with your dataset paths, as well as other training hyper-parameters.
 ```json
 "dataset": {
         "path": "path/to/ims/folder/",
     }
 ```
 
-## Run
-
+## Running vMAP / iMAP
+The following commands will run vMAP / iMAP in a single-thread setting (singe GPU for both training and visualisation).
 [comment]: <> (### Single thread demo)
 #### vMAP
 ```bash
-./train.py --config ./configs/Replica/config_replica_room0_vMAP.json --logdir ./logs/vMAP/room0 --save_ckpt True
+python ./train.py --config ./configs/Replica/config_replica_room0_vMAP.json --logdir ./logs/vMAP/room0 --save_ckpt True
 ```
-#### iMAP*
+#### iMAP
 ```bash
-./train.py --config ./configs/Replica/config_replica_room0_iMAP.json --logdir ./logs/iMAP/room0 --save_ckpt True
+python ./train.py --config ./configs/Replica/config_replica_room0_iMAP.json --logdir ./logs/iMAP/room0 --save_ckpt True
 ```
 
 [comment]: <> (#### Multi thread demo)
@@ -99,16 +84,16 @@ Change dataset paths in *configs/.json*:
 [comment]: <> (```)
 
 ## Evaluation
-### Reconstruction Error
-#### 3D Scene-level Eval
-Same metrics follow iMAP, compare against GT scene mesh
+To evaluate the quality of reconstructed scenes, we provide two different methods,
+#### 3D Scene-level Evaluation
+The same metrics following the original iMAP, to compare with GT scene meshes by **Accuracy**, **Completion** and **Completion Ratio**.
 ```bash
-./metric/eval_3D_scene.py
+python ./metric/eval_3D_scene.py
 ```
-#### 3D Object-level Eval
-We find scene-level metrics are biased by background mesh, so we propose object-level metrics by evaluating every object in each scene and then average.
+#### 3D Object-level Evaluation
+We also provide the object-level metrics by computing the same metrics but averaging across all objects in a scene.
 ```bash
-./metric/eval_3D_obj.py
+python ./metric/eval_3D_obj.py
 ```
 
 [comment]: <> (### Novel View Synthesis)
@@ -124,10 +109,19 @@ We find scene-level metrics are biased by background mesh, so we propose object-
 [comment]: <> (```)
 
 ## Acknowledgement
-We thank great open-sourced repos: [NICE-SLAM](https://github.com/cvg/nice-slam), and [Functorch](https://github.com/pytorch/functorch).
+We would like thank the following open-source repositories that we have build upon for the implementation of this work: [NICE-SLAM](https://github.com/cvg/nice-slam), and [functorch](https://github.com/pytorch/functorch).
 
 ## Citation
-If you find our code or paper useful, please consider cite
+If you found this code/work to be useful in your own research, please considering citing the following:
+```bibtex
+@article{kong2023vmap,
+  title={vMAP: Vectorised Object Mapping for Neural Field SLAM},
+  author={Kong, Xin and Liu, Shikun and Taher, Marwan and Davison, Andrew J},
+  journal={arXiv preprint arXiv:TODO},
+  year={2023}
+}
+```
+
 ```bibtex
 @inproceedings{sucar2021imap,
   title={iMAP: Implicit mapping and positioning in real-time},
@@ -136,11 +130,5 @@ If you find our code or paper useful, please consider cite
   pages={6229--6238},
   year={2021}
 }
-
-@article{kong2023vmap,
-  title={vMAP: Vectorised Object Mapping for Neural Field SLAM},
-  author={Kong, Xin and Liu, Shikun and Taher, Marwan and Davison, Andrew J},
-  journal={arXiv preprint arXiv:TODO},
-  year={2023}
-}
 ```
+
