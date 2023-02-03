@@ -48,11 +48,11 @@ Please download the following datasets to reproduce our results.
 * [Replica](https://huggingface.co/datasets/kxic/vMAP/resolve/main/vmap.zip) - All Replica sequences.
 * [ScanNet](https://github.com/ScanNet/ScanNet) - Official ScanNet sequences.
 Each dataset contains a sequence of RGB-D images, as well as their corresponding camera poses, and object instance labels.
-
-```bash
-conda activate py2
-python2 reader.py --filename ~/data/ScanNet/scannet/scans/scene0024_00/scene0024_00.sens --output_path ~/data/ScanNet/objnerf/ --export_depth_images --export_color_images --export_poses --export_intrinsics
-```
+To extract data from ScanNet .sens files, run
+    ```bash
+    conda activate py2
+    python2 reader.py --filename ~/data/ScanNet/scannet/scans/scene0024_00/scene0024_00.sens --output_path ~/data/ScanNet/objnerf/ --export_depth_images --export_color_images --export_poses --export_intrinsics
+    ```
 
 ## Config
 
@@ -66,7 +66,6 @@ Then update the config files in `configs/.json` with your dataset paths, as well
 ## Running vMAP / iMAP
 The following commands will run vMAP / iMAP in a single-thread setting (singe GPU for both training and visualisation).
 
-[comment]: <> (### Single thread demo)
 #### vMAP
 ```bash
 python ./train.py --config ./configs/Replica/config_replica_room0_vMAP.json --logdir ./logs/vMAP/room0 --save_ckpt True
