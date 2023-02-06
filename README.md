@@ -16,7 +16,7 @@
   </p>
 
 [comment]: <> (  <h2 align="center">PAPER</h2>)
-  <h3 align="center"><a href="https://arxiv.org/abs/TODO">Paper</a> | Video | <a href="https://kxhit.github.io/vMAP">Project Page</a></h3>
+  <h3 align="center"><a href="https://arxiv.org/abs/2302.01838">Paper</a> | Video | <a href="https://kxhit.github.io/vMAP">Project Page</a></h3>
   <div align="center"></div>
 
 <p align="center">
@@ -117,7 +117,7 @@ If you found this code/work to be useful in your own research, please considerin
 @article{kong2023vmap,
   title={vMAP: Vectorised Object Mapping for Neural Field SLAM},
   author={Kong, Xin and Liu, Shikun and Taher, Marwan and Davison, Andrew J},
-  journal={arXiv preprint arXiv:TODO},
+  journal={arXiv preprint arXiv:2302.01838},
   year={2023}
 }
 ```
