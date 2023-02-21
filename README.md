@@ -108,6 +108,11 @@ python ./metric/eval_3D_obj.py
 
 [comment]: <> (```)
 
+## Results
+We provide raw results, including 3D meshes, 2D novel view rendering, and evaluated metrics of vMAP and iMAP* for easier comparison.
+
+* [Replica](https://huggingface.co/datasets/kxic/vMAP/resolve/main/vMAP_Replica_Results.zip)
+
 ## Acknowledgement
 We would like thank the following open-source repositories that we have build upon for the implementation of this work: [NICE-SLAM](https://github.com/cvg/nice-slam), and [functorch](https://github.com/pytorch/functorch).
 
