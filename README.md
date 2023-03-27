@@ -16,7 +16,7 @@
   </p>
 
 [comment]: <> (  <h2 align="center">PAPER</h2>)
-  <h3 align="center"><a href="https://arxiv.org/abs/2302.01838">Paper</a> | Video | <a href="https://kxhit.github.io/vMAP">Project Page</a></h3>
+  <h3 align="center"><a href="https://arxiv.org/abs/2302.01838">Paper</a> | <a href="https://youtu.be/_H_jNnhUAsE">Video</a> | <a href="https://kxhit.github.io/vMAP">Project Page</a></h3>
   <div align="center"></div>
 
 <p align="center">
