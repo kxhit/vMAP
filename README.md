@@ -45,7 +45,7 @@ conda env create -f environment.yml
 Please download the following datasets to reproduce our results.
 
 * [Replica Demo](https://huggingface.co/datasets/kxic/vMAP/resolve/main/demo_replica_room_0.zip) - Replica Room 0 only for faster experimentation.
-* [Replica](https://huggingface.co/datasets/kxic/vMAP/resolve/main/vmap.zip) - All Replica sequences.
+* [Replica](https://huggingface.co/datasets/kxic/vMAP/resolve/main/vmap.zip) - All Pre-generated Replica sequences. For Replica data generation, please refer to directory `data_generation`.
 * [ScanNet](https://github.com/ScanNet/ScanNet) - Official ScanNet sequences.
 Each dataset contains a sequence of RGB-D images, as well as their corresponding camera poses, and object instance labels.
 To extract data from ScanNet .sens files, run
