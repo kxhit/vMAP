@@ -6,7 +6,7 @@ def step_batch_loss(alpha, color, gt_depth, gt_color, sem_labels, mask_depth, z_
                     color_scaling=5.0, opacity_scaling=10.0):
     """
     apply depth where depth are valid                                       -> mask_depth
-    apply depth, color loss on this_obj & unkown_obj == (~other_obj)        -> mask_obj
+    apply depth, color loss on this_obj & unknown_obj == (~other_obj)        -> mask_obj
     apply occupancy/opacity loss on this_obj & other_obj == (~unknown_obj)  -> mask_sem
 
     output:
@@ -51,7 +51,7 @@ def step_batch_loss(alpha, color, gt_depth, gt_color, sem_labels, mask_depth, z_
     # print("opacity max ", torch.max(render_opacity.max()))
     # print("opacity min ", torch.max(render_opacity.min()))
     loss_opacity_raw = render_rays.render_loss(render_opacity, mask_obj.float(), loss="L1", normalise=False)
-    loss_opacity = torch.mul(loss_opacity_raw, mask_sem)  # but ignore -1 unkown area e.g., mask edges
+    loss_opacity = torch.mul(loss_opacity_raw, mask_sem)  # but ignore -1 unknown area e.g., mask edges
     # loss_all += loss_opacity * opacity_scaling
     loss_opacity = render_rays.reduce_batch_loss(loss_opacity, var=None, avg=True, mask=mask_sem)   # todo var
 
